@@ -146,6 +146,7 @@ const mockTools = readStorage('tools') || [
   { id: 'tool-8', name: '知识图谱', description: '查询百科知识', iconKey: '知识', enabled: true, category: '知识', type: 'cloud' },
   { id: 'tool-9', name: '代码执行', description: '执行 Python 代码，支持数学计算、数据处理等', iconKey: '代码', enabled: true, category: '工具', type: 'tool' },
   { id: 'tool-10', name: '地图导航', description: '打开地图导航到指定地点', iconKey: '地图', enabled: true, category: '生活', type: 'mobile_app' },
+  { id: 'tool-11', name: '系统时间', description: '获取当前系统时间和日期', iconKey: '时间', enabled: true, category: '系统', type: 'tool' },
 ]
 
 // HTTP 响应辅助函数
@@ -781,7 +782,20 @@ const server = http.createServer(async (req, res) => {
           }
 
           const userSystemPrompt = await supabaseGetSetting('system_prompt') || ''
-          const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}` : userSystemPrompt
+          
+          // 添加工具调用能力
+          const toolsInfo = `
+【可用工具】你可以使用以下工具（根据需要调用）：
+1. 系统时间 - 获取当前系统时间和日期
+   调用格式：{"tool":"系统时间","params":{}}
+   使用场景：当需要知道当前时间、日期、星期几时调用
+
+工具调用规则：
+- 直接输出 JSON 格式的工具调用指令
+- 可以连续调用多个工具，用换行分隔
+- 如果不需要工具，直接回答用户问题即可
+`
+          const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}\n\n${toolsInfo}` : userSystemPrompt
 
           // 【关键修复】创建消息副本，不修改原始消息（避免污染数据库）
           const messagesCopy = newMessages
@@ -804,8 +818,48 @@ ${fullSystemPrompt}
           }
 
           // 调用 AI（使用副本，不影响原始数据库消息）
-          const aiReply = await callAIProvider(null, messagesCopy)
-          return sendJson(res, 200, { reply: aiReply, toolResults: [] })
+          let aiReply = await callAIProvider(null, messagesCopy)
+          
+          // 【新增】处理工具调用（检查 AI 回复中是否有工具调用指令）
+          const toolResults = []
+          const toolCallRegex = /\{"tool":"([^"]+)","params":\{([^}]*)\}\}/g
+          let match
+          
+          while ((match = toolCallRegex.exec(aiReply)) !== null) {
+            const toolName = match[1]
+            console.log('[TOOL-CALL] 检测到工具调用:', toolName)
+            
+            if (toolName === '系统时间') {
+              // 执行系统时间工具
+              const now = new Date()
+              const result = {
+                tool: '系统时间',
+                success: true,
+                result: {
+                  year: now.getFullYear(),
+                  month: now.getMonth() + 1,
+                  day: now.getDate(),
+                  hour: now.getHours(),
+                  minute: now.getMinutes(),
+                  second: now.getSeconds(),
+                  weekday: ['日', '一', '二', '三', '四', '五', '六'][now.getDay()],
+                  fullText: `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 星期${['日', '一', '二', '三', '四', '五', '六'][now.getDay()]} ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`
+                }
+              }
+              toolResults.push(result)
+              console.log('[TOOL-CALL] 系统时间执行结果:', result.result.fullText)
+            }
+          }
+          
+          // 如果有工具调用结果，把结果告知 AI，让它重新组织语言
+          if (toolResults.length > 0) {
+            const resultText = toolResults.map(r => `工具执行结果：${JSON.stringify(r.result)}`).join('\n')
+            messagesCopy.push({ role: 'assistant', content: aiReply })
+            messagesCopy.push({ role: 'user', content: `【工具执行结果】\n${resultText}\n\n请根据以上工具执行结果，用自然语言回复用户。` })
+            aiReply = await callAIProvider(null, messagesCopy)
+          }
+
+          return sendJson(res, 200, { reply: aiReply, toolResults: toolResults })
         }
         // 步骤一：保存用户消息到数据库
         const savedUserMsg = await supabaseCreateMessage({
