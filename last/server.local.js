@@ -777,15 +777,19 @@ const server = http.createServer(async (req, res) => {
 
           // 组装完整消息：系统提示词 + 用户消息
           const fullMessages = []
-          if (baseSystemPrompt) {
-            fullMessages.push({ role: 'system', content: baseSystemPrompt })
-          }
-          // 添加历史消息
-          newMessages.slice(0, -1).forEach(msg => {
-            fullMessages.push(msg)
+          
+          // 强制添加系统提示词（确保生效）
+          fullMessages.push({ role: 'system', content: baseSystemPrompt })
+          
+          // 添加历史消息（排除前端可能传递的 system 消息，避免重复）
+          newMessages.forEach(msg => {
+            if (msg.role !== 'system') {
+              fullMessages.push(msg)
+            }
           })
-          // 添加最后一条用户消息
-          fullMessages.push(newMessages[newMessages.length - 1])
+
+          console.log('[AI-CALL] 最终发送给 AI 的消息数量:', fullMessages.length)
+          console.log('[AI-CALL] 系统提示词长度:', baseSystemPrompt.length)
 
           // 调用 AI
           const aiReply = await callAIProvider(null, fullMessages)
