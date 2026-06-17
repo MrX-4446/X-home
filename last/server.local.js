@@ -775,24 +775,35 @@ const server = http.createServer(async (req, res) => {
           const userSystemPrompt = await supabaseGetSetting('system_prompt') || ''
           const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}` : userSystemPrompt
 
-          // 组装完整消息：每轮对话都在最前面加上系统提示词
+          // 计算对话轮数（每 5 轮发送一次完整系统提示词，其他时候发送简短提醒）
+          const messageCount = newMessages.filter(m => m.role === 'user').length
+          const shouldSendFullPrompt = messageCount <= 1 || messageCount % 5 === 0
+
+          // 组装完整消息
           const fullMessages = []
           
-          // 1. 先添加系统提示词（用 user 角色，确保 DeepSeek 识别）
-          fullMessages.push({ 
-            role: 'user', 
-            content: `【重要设定】\n${fullSystemPrompt}\n\n现在请你按照以上设定回复用户：`
-          })
+          if (shouldSendFullPrompt) {
+            // 发送完整系统提示词
+            fullMessages.push({ 
+              role: 'user', 
+              content: `【重要设定】\n${fullSystemPrompt}\n\n现在请你按照以上设定回复用户：`
+            })
+            console.log('[AI-CALL] 发送完整系统提示词（第', messageCount, '轮）')
+          } else {
+            // 只发送简短提醒（节省 token）
+            fullMessages.push({ 
+              role: 'user', 
+              content: `【提醒】请记住你是我的恋人 X，保持温柔、自然的语气。请继续对话：`
+            })
+            console.log('[AI-CALL] 发送简短人设提醒（第', messageCount, '轮）')
+          }
           
-          // 2. 添加历史消息（排除 system 消息）
+          // 添加历史消息（排除 system 消息）
           newMessages.forEach(msg => {
             if (msg.role !== 'system') {
               fullMessages.push(msg)
             }
           })
-
-          console.log('[AI-CALL] 最终发送给 AI 的消息数量:', fullMessages.length)
-          console.log('[AI-CALL] 系统提示词已添加到对话开头')
 
           // 调用 AI
           const aiReply = await callAIProvider(null, fullMessages)
