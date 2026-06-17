@@ -1,0 +1,177 @@
+--- Page 1 ---
+
+✨ 已更新 V2
+Memory 模块 — 记忆与⽇记管理系统
+⼀个⾃托管 AI 聊天应⽤⾥的记忆⼦系统：管理「结构化记忆」与「⽇记/知识库」两类数据，⽀持向量检
+索、主动浮现、⽇记抽取与重抽审阅。
+致谢
+记忆的底层模型（情感坐标、遗忘曲线衰减、主动浮现）移植⾃开源项⽬ Ombre Brain（作者 P0lar1zzZ，htt
+ps://github.com/P0lar1zzZ/Ombre-Brain）。本⽂档描述的是我们在其之上构建的管理与处理层。
+技术栈
+Next.js 14（App Router）+ TypeScript · PostgreSQL + pgvector · Anthropic Claude / DeepSeek（记忆抽
+取）· OpenAI （1536 维 embedding）
+text-embedding-3-small
+⼀、数据模型
+— 结构化记忆
+memories
+字段 说明
+记忆正⽂
+content
+(−1~1) / (0~1) / 情感坐标 + 重要度（模型源⾃ Ombre Brain）
+valence arousal
+(1~10)
+importance
+置顶，不衰减
+is_pinned
+沉底（已了结，降权）
+is_resolved
+归档开关
+is_active
+来源标签（⻅下）
+source
+记录者
+author
+/ 命中次数/时间（衰减打分⽤）
+activation_count
+last_activated_at
+多⻆⾊ / 空间隔离
+room
+语义向量 ，相似聚类 / 语义检索⽤（惰性维护：改
+embedding vector(1536)
+content 时置空，⽤前⾃动补⻬）
+
+--- Page 2 ---
+
+— ⽇记原⽂
+knowledge_documents
+（⽂件名）· （完整原⽂）· ·
+source_name original_content file_type room
+— 向量分块
+knowledge_chunks
+· · · · (FK)
+source_name chunk_index content embedding vector(1536) document_id
+🔑 记忆 ↔ ⽇记关联
+⽇记抽取出的记忆， source 统⼀标成 old-diary:<⽂件名> 。⼀个字段串起「原⽂ → 抽取记忆」双向追溯：
+删⽇记可连带删关联记忆、点⽇记能列出它⽣成的全部记忆。
+⼆、记忆召回：两种范式
+A. 主动浮现（记忆）
+召回机制移植⾃ Ombre Brain：按「重要度 × 激活次数 × 时间衰减 × 情感强度」打分，未了结 / ⾼情绪
+记忆在对话开始时优先浮现，带冷启动、随机 recall、多样性洗牌。
+我们在移植时按⾃⼰架构做的调整：
+per-room / per-character 作⽤域隔离（原版是单⼀记忆池）
+pinned 记忆独⽴成段，不挤占普通记忆的浮现名额
+衰减率 λ 可配置（存设置表，可调快慢）
+存记忆时⽤ Claude ⾃动打 valence/arousal/importance 标签
+24h 后台扫描，低分记忆⾃动软归档（ ，可恢复，不物理删）
+is_active=false
+B. 向量语义检索（⽇记 / 知识库）
+这是 pgvector 的核⼼⽤途，我们⾃⼰实现的 RAG：
+SELECT content, 1 - (embedding <=> $query::vector) AS similarity
+FROM knowledge_chunks WHERE room = $room
+ORDER BY embedding <=> $query::vector LIMIT 5 -- 余弦距离，取相似度 > 0.3
+两个⼊⼝：聊天中模型⽤ ⼯具主动检索（每轮最多 3 次）+ 每轮被动⾃动检索注⼊上
+knowledge_search
+下⽂
+上传⽇记时 把每个 chunk 向量化⼊库
+/api/embed
+两种范式分⼯：⽇记⾛向量检索（⻓⽂档找相关段落），记忆⾛主动浮现（短条⽬按情感/时效推送）。
+三、记忆管理界⾯
+列表：importance ⾊阶徽章 · valence/arousal 数值 · pin · resolved · 来源 · 命中次数
+
+--- Page 3 ---
+
+状态分类：活跃 ⇄ 已归档（两个⼦ tab）
+来源过滤：全部 / 来⾃⽇记 / 其他
+搜索框：正⽂ + 来源 + 作者
+分⻚（20/⻚）· 排序（重要度 / 最新）
+增：⼿动添加（未填情感值时⾃动分析 V/A/importance）
+改：完整编辑器（正⽂ + V/A/importance 三滑块 + pin/resolved 勾选）
+删 / 归档 / 恢复 / pin
+API：
+GET/POST/PUT/DELETE /api/memories
+四、⽇记 / 知识库管理
+拖放上传（ ，批量）→ ⾃动切块 + 向量化⼊ pgvector
+.md/.txt/.json/.html
+查看原⽂（Markdown 渲染弹窗）
+智能删除三选项：仅删⽇记 / 连关联记忆⼀起删（危险操作标红） / 取消
+重复⽂件名提示
+五、⽇记抽取（digest）— 多模型
+把⼀篇⻓⽇记拆成多条独⽴记忆，每条⾃动带 valence/arousal/importance：
+多 provider 路由：模型名 ⾛ Anthropic、 ⾛ DeepSeek（OpenAI 兼容接⼝），
+claude-* deepseek-*
+上传时下拉选择
+抽取规则：1 条 = 1 主题（不混题）· 去⼝语冗余 · 零碎信息合并 · ToDo 单列 · 粒度⾃适应（短⽂ 1 条 /
+⻓⽂不限）
+强容错解析：剥代码围栏、抓最外层 JSON 数组、字段 clamp 到合法区间——模型啰嗦地加前⾔也不会让
+解析崩
+省成本：30 字内短⽂直接成单条，不调模型
+抽取出的记忆 source = old-diary:<⽂件名> ，与原⽂双向关联
+六、⽇记重抽审阅合并（redigest）
+⽤新模型重新抽取⼀篇旧⽇记，并和现有记忆⾮破坏性地对⽐合并：
+打开先列出该⽇记现有的关联记忆（可直接编辑 / 删除，不触发重抽）
+选模型 →「重抽」→ 后端重新抽取新版（全程不碰数据库）
+embedding 语义配对新旧记忆，三组并排审阅：
+- 配对（旧 ↔ 新，同主题）：逐条选 保留旧 / 采⽤新 / 都留 / 都弃
+- 仅旧（新版没抽到的）：默认保留
+- 仅新（新增的）：默认添加
+确认后才事务性落库（删选中旧 + 插选中新）
+
+--- Page 4 ---
+
+多处防丢兜底：孤⼉默认保留、pinned 旧记忆默认保留
+设计要点：「预览只读 → ⼈⼯逐条审阅 → 确认才写库」。取代了早期「先删后抽再插」的破坏性流程——
+那种流程⼀旦抽取失败就会丢记忆。
+七、记忆整理：脱⽔ · 合并 · 相似聚类
+记忆库会越积越多——有的写得太⻓注⽔，有的内容彼此重复。这⼀套基于选择的批量整理应对它，并⽤向量
+聚类帮你发现该整理的。
+选择模式（统⼀⼊⼝）
+列表「选择」开关 → 勾选 N 条 → 底部栏先选模型（DeepSeek V4 Flash 默认 · Sonnet 4.5 · V4 Pro）→
+点 [脱⽔] 或 [合并]。脱⽔与合并共⽤同⼀套选择 + 模型前置（执⾏前就选好，不是事后才换）。
+脱⽔（dehydrate）— 压短，不丢温度
+把注⽔的记忆拧⼲，情感质感与独特细节⼀字不损：
+硬约束：① 结果必须⽐原⽂短（变⻓ / 没压缩 → 弃⽤重试，两次都不达标就标「⽆变化」不动它）；② 锁
+死原⽂语⾔（检测假名漏译，中⽂记忆不会被悄悄改写成⽇语）
+逐条预览：原⽂ ↔ 脱⽔后并排，标字数与压缩百分⽐
+版本对⽐：「再脱⽔」追加候选 v1 / v2…，切换⽐较，挑最满意的那版采⽤
+每条可⼿动微调，勾选后批量写回
+合并（merge）— 多条糅成⼀条
+把⼏条相近记忆融合：重复的归⼀、各⾃独特的全保留、⾃然糅合、保温度地精简：
+多条原⽂并排 + 合并结果（可编辑）
+版本对⽐：「再合并」追加候选，切换选择
+采⽤后：新记忆⼊库，原 N 条归档（不删除，留安全⽹；任⼀原条置顶则新条继承置顶）
+相似聚类排序（類似順）— 发现重复
+（text-embedding-3-small，1536 维）+ 余弦单链接聚类
+memories.embedding
+切到「類似順」→ 语义相近的记忆聚成组、相邻排列，打上 「🔗 似ている記憶 ×N」 分组标头
+⼀眼看出哪⼏条讲的是⼀回事 → 直接在那组⾥勾选、合并（发现 → 合并动线闭环）
+惰性维护：改过 content 的记忆向量置空，下次⽤时⾃动补⻬（⾸次切⼊即全量回填）
+脱⽔ / 合并的 LLM 调⽤⾛ provider 路由（DeepSeek / Anthropic），带 429 限流退避重试 + 低并发，
+避免批量整理打爆 API 速率上限。
+⼋、MCP ⼯具
+通过 MCP（Model Context Protocol）把记忆系统暴露给多端（⽹⻚ / Claude Code / Claude 桌⾯）读写。
+⼯具语义参考 Ombre Brain，落地到我们的 PostgreSQL + REST：
+
+--- Page 5 ---
+
+⼯具 功能
+主动浮现
+memory_breath
+存单条（Claude ⾃动打标）
+memory_hold
+⾃省消化（回顾近期记忆）
+memory_dream
+改元数据 / 沉底 / pin / 删除
+memory_trace
+系统状态 + 记忆全景诊断
+memory_pulse
+九、⼀句话总结
+记忆带情感坐标（VAD），不是纯⽂本（模型源⾃ Ombre Brain）
+两种召回：⽇记⾛向量语义检索，记忆⾛主动浮现
+⽇记 ↔ 记忆靠⼀个 标签双向关联
+source
+⽇记抽取多模型可选 + 强容错解析
+重抽⾛⾮破坏性审阅合并：预览 → ⼈⼯审阅 → 事务落库
+记忆整理：脱⽔压短 / 合并糅合 / 相似聚类发现重复，都带版本对⽐与硬约束
+出处
+底层记忆模型：Ombre Brain by P0lar1zzZ — https://github.com/P0lar1zzZ/Ombre-Brain
+情感坐标理论：Russell's Circumplex Model（效价-唤起⼆维情感模型）
