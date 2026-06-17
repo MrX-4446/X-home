@@ -505,6 +505,14 @@ async function callAIProvider(provider, messages) {
   }
 
   // OpenAI 兼容格式调用
+  console.log('\n========== 发送给 AI 的消息 ==========')
+  messages.forEach((msg, idx) => {
+    console.log(`[${idx}] ${msg.role}:`)
+    console.log(msg.content.substring(0, 300) + (msg.content.length > 300 ? '...' : ''))
+    console.log('---')
+  })
+  console.log('=======================================\n')
+
   const response = await fetch(aiProvider.endpoint, {
     method: 'POST',
     headers: {
@@ -775,20 +783,23 @@ const server = http.createServer(async (req, res) => {
           const userSystemPrompt = await supabaseGetSetting('system_prompt') || ''
           const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}` : userSystemPrompt
 
-          // 【强硬方式】把系统提示词放在第一条用户消息的最前面
-          // 过滤出真实消息
+          // 【关键修复】把人设指令加在【最后一条用户消息】上（AI 最关注最后几条消息）
           const realMessages = newMessages.filter(m => m.role !== 'system')
           
-          if (realMessages.length > 0 && realMessages[0].role === 'user') {
-            // 强制在第一条用户消息前加入人设指令（用最强硬的方式）
-            const firstMessage = realMessages[0]
-            const systemInstruction = `【重要！必须严格遵守】
+          // 找到最后一条用户消息
+          for (let i = realMessages.length - 1; i >= 0; i--) {
+            if (realMessages[i].role === 'user') {
+              // 强制在最后一条用户消息前加入人设指令（AI 最关注最后一条）
+              const lastMessage = realMessages[i]
+              const systemInstruction = `【重要！必须严格遵守以下设定】
 ${fullSystemPrompt}
 
-【用户消息】请按照以上设定回复：`
+【用户消息】请严格按照以上设定回复：`
 
-            firstMessage.content = systemInstruction + firstMessage.content
-            console.log('[AI-CALL] 已强制在第一条消息前加入人设指令')
+              lastMessage.content = systemInstruction + lastMessage.content
+              console.log('[AI-CALL] 已强制在最后一条用户消息前加入人设指令（索引', i, '）')
+              break
+            }
           }
 
           // 调用 AI
