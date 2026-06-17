@@ -727,13 +727,16 @@ const server = http.createServer(async (req, res) => {
     // ===== 设置 API =====
     if (pathname === '/api/settings' && req.method === 'GET') {
       if (USE_MOCK) {
+        // 从本地 JSON 文件读取设置，如果没有则返回空
+        const savedSettings = readStorage('settings') || {}
         const mockSettings = {
-          system_prompt: '你是一个智能助手，乐于助人，回答准确。',
-          temperature: '0.7',
-          max_tokens: '4096',
-          top_p: '0.9',
-          memory_threshold: '3000',
-          keep_recent_messages: '10',
+          chat_name: savedSettings.chat_name || '',
+          system_prompt: savedSettings.system_prompt || '',
+          temperature: savedSettings.temperature || '0.7',
+          max_tokens: savedSettings.max_tokens || '4096',
+          top_p: savedSettings.top_p || '0.9',
+          memory_threshold: savedSettings.memory_threshold || '3000',
+          keep_recent_messages: savedSettings.keep_recent_messages || '10',
         }
         return sendJson(res, 200, { data: mockSettings })
       }
@@ -749,6 +752,10 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/api/settings' && req.method === 'PUT') {
       const updates = await readBody(req)
       if (USE_MOCK) {
+        // MOCK 模式下，保存设置到本地 JSON 文件
+        const currentSettings = readStorage('settings') || {}
+        const newSettings = { ...currentSettings, ...updates }
+        writeStorage('settings', newSettings)
         return sendJson(res, 200, { ok: true })
       }
       for (const [key, value] of Object.entries(updates)) {
