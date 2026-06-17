@@ -273,6 +273,20 @@ async function supabaseDeleteAIProvider(id) {
 // ========== 设置和记忆相关函数 ==========
 
 async function supabaseGetSetting(key) {
+  // MOCK 模式下返回默认值
+  if (USE_MOCK) {
+    const defaults = {
+      temperature: '0.7',
+      max_tokens: '4096',
+      top_p: '0.9',
+      memory_threshold: '3000',
+      keep_recent_messages: '10',
+      memory_decay_rate: '0.01',
+      system_prompt: '你是一个智能助手，乐于助人，回答准确。',
+    }
+    return defaults[key] || null
+  }
+  
   const { data, error } = await supabase
     .from('settings')
     .select('value')
@@ -462,12 +476,18 @@ async function surfaceMemories(chatId, limit = 10) {
 
 async function callAIProvider(provider, messages) {
   // 获取启用的 AI 提供商配置
-  const { data: providers } = await supabase
-    .from('ai_providers')
-    .select('*')
-    .eq('enabled', true)
-    .order('created_at', { ascending: false })
-    .limit(1)
+  let providers
+  if (USE_MOCK) {
+    providers = mockAIProviders.filter(p => p.enabled)
+  } else {
+    const { data } = await supabase
+      .from('ai_providers')
+      .select('*')
+      .eq('enabled', true)
+      .order('created_at', { ascending: false })
+      .limit(1)
+    providers = data
+  }
 
   if (!providers || providers.length === 0) {
     throw new Error('没有可用的 AI 提供商')
@@ -475,12 +495,21 @@ async function callAIProvider(provider, messages) {
 
   const aiProvider = providers[0]
 
+  // 获取 API Key
+  let apiKey = process.env.ARK_API_KEY || ''
+  if (!apiKey && aiProvider._apiKeyPlain) {
+    apiKey = aiProvider._apiKeyPlain
+  }
+  if (!apiKey) {
+    throw new Error('未配置有效的 API Key，请在 .env 中设置 ARK_API_KEY')
+  }
+
   // OpenAI 兼容格式调用
   const response = await fetch(aiProvider.endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.ARK_API_KEY || 'mock-key'}`,
+      'Authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
       model: aiProvider.model,
