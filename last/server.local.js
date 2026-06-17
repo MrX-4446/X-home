@@ -783,27 +783,28 @@ const server = http.createServer(async (req, res) => {
           const userSystemPrompt = await supabaseGetSetting('system_prompt') || ''
           const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}` : userSystemPrompt
 
-          // 【关键修复】把人设指令加在【最后一条用户消息】上（AI 最关注最后几条消息）
-          const realMessages = newMessages.filter(m => m.role !== 'system')
+          // 【关键修复】创建消息副本，不修改原始消息（避免污染数据库）
+          const messagesCopy = newMessages
+            .filter(m => m.role !== 'system')
+            .map(m => ({ ...m }))  // 浅拷贝，创建新对象
           
           // 找到最后一条用户消息
-          for (let i = realMessages.length - 1; i >= 0; i--) {
-            if (realMessages[i].role === 'user') {
+          for (let i = messagesCopy.length - 1; i >= 0; i--) {
+            if (messagesCopy[i].role === 'user') {
               // 强制在最后一条用户消息前加入人设指令（AI 最关注最后一条）
-              const lastMessage = realMessages[i]
               const systemInstruction = `【重要！必须严格遵守以下设定】
 ${fullSystemPrompt}
 
 【用户消息】请严格按照以上设定回复：`
 
-              lastMessage.content = systemInstruction + lastMessage.content
-              console.log('[AI-CALL] 已强制在最后一条用户消息前加入人设指令（索引', i, '）')
+              messagesCopy[i].content = systemInstruction + messagesCopy[i].content
+              console.log('[AI-CALL] 已在副本最后一条用户消息前加入人设指令（索引', i, '）')
               break
             }
           }
 
-          // 调用 AI
-          const aiReply = await callAIProvider(null, realMessages)
+          // 调用 AI（使用副本，不影响原始数据库消息）
+          const aiReply = await callAIProvider(null, messagesCopy)
           return sendJson(res, 200, { reply: aiReply, toolResults: [] })
         }
         // 步骤一：保存用户消息到数据库
