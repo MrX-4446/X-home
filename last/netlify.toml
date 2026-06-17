@@ -1,0 +1,101 @@
+# =============================================================
+# 后端 Netlify 配置
+# - functions 目录：netlify/functions
+# - 路由重写：把 /api/* 映射到对应函数
+#   /api/chat        → chat.js
+#   /api/chats       → chats.js
+#   /api/chats/xxx   → chats.js（路径参数由函数内部解析）
+#   /api/messages    → messages.js
+#   /api/messages/xxx→ messages.js
+# =============================================================
+
+[build]
+  # 后端不需要前端构建。publish 指向当前目录即可（Netlify 必须有 publish 才行）
+  command = "echo 'no build for backend'"
+  publish = "."
+  functions = "netlify/functions"
+
+# /api/chat → /.netlify/functions/chat
+[[redirects]]
+  from = "/api/chat"
+  to = "/.netlify/functions/chat"
+  status = 200
+
+# /api/chats 与 /api/chats/:id 全部交给 chats.js 自己解析
+[[redirects]]
+  from = "/api/chats"
+  to = "/.netlify/functions/chats"
+  status = 200
+
+[[redirects]]
+  from = "/api/chats/*"
+  to = "/.netlify/functions/chats/:splat"
+  status = 200
+
+# /api/messages 与 /api/messages/:id
+[[redirects]]
+  from = "/api/messages"
+  to = "/.netlify/functions/messages"
+  status = 200
+
+[[redirects]]
+  from = "/api/messages/*"
+  to = "/.netlify/functions/messages/:splat"
+  status = 200
+
+# /api/ai-status → 检查 AI 接入基础配置
+[[redirects]]
+  from = "/api/ai-status"
+  to = "/.netlify/functions/ai-status"
+  status = 200
+
+# /api/ai-providers 与 /api/ai-providers/:id/test
+[[redirects]]
+  from = "/api/ai-providers"
+  to = "/.netlify/functions/ai-providers"
+  status = 200
+
+[[redirects]]
+  from = "/api/ai-providers/*"
+  to = "/.netlify/functions/ai-providers/:splat"
+  status = 200
+
+# /api/memories 与 /api/memories/:id、/surface、/:id/touch
+[[redirects]]
+  from = "/api/memories"
+  to = "/.netlify/functions/memories"
+  status = 200
+
+[[redirects]]
+  from = "/api/memories/*"
+  to = "/.netlify/functions/memories/:splat"
+  status = 200
+
+# /api/tools 与 /api/tools/:id
+[[redirects]]
+  from = "/api/tools"
+  to = "/.netlify/functions/tools"
+  status = 200
+
+[[redirects]]
+  from = "/api/tools/*"
+  to = "/.netlify/functions/tools/:splat"
+  status = 200
+
+# /api/settings
+[[redirects]]
+  from = "/api/settings"
+  to = "/.netlify/functions/settings"
+  status = 200
+
+# /api/heartbeat → 健康检查心跳
+[[redirects]]
+  from = "/api/heartbeat"
+  to = "/.netlify/functions/heartbeat"
+  status = 200
+
+# /api/execute-code → 云端安全占位接口，不执行用户代码
+[[redirects]]
+  from = "/api/execute-code"
+  to = "/.netlify/functions/execute-code"
+  status = 200

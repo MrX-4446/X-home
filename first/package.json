@@ -1,0 +1,20 @@
+{
+  "name": "chat-interface",
+  "version": "1.0.0",
+  "description": "Frontend (React + Vite) — 仅 UI，所有数据访问与 AI 调用通过后端 API",
+  "scripts": {
+    "dev": "npx vite",
+    "build": "npx vite build",
+    "preview": "npx vite preview",
+    "deploy": "npm run build && npx gh-pages -d dist"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.0",
+    "gh-pages": "^6.1.1",
+    "vite": "^5.0.0"
+  }
+}
