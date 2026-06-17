@@ -208,7 +208,7 @@ function App() {
     // 3) 调用后端 AI 接口，并把已启用工具交给后端，由后端统一执行工具调用
     const aiResult = await chatWithAI({
       chatId: chatId,
-      system: settings.system_prompt || '你是一个温柔、自然的中文聊天伙伴，回答简洁口语化。',
+      system: settings.system_prompt || '',
       messages: messagesForAI,
       model: selectedModel,
       temperature: parseFloat(settings.temperature) || aiConfig.temperature,
