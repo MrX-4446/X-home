@@ -63,22 +63,24 @@ function writeStorage(key, data) {
 // AI 连接测试函数
 async function testAIProvider(provider) {
   try {
-    // 使用 provider 中存储的 API Key（本地开发明文存储）
-    let apiKey = provider.api_key || provider.apiKey || ''
+    // 优先使用环境变量中的 API Key（服务器部署推荐）
+    let apiKey = process.env.ARK_API_KEY || ''
+    
+    // 如果环境变量没有，尝试使用 provider 中存储的 API Key
+    if (!apiKey) {
+      apiKey = provider.api_key || provider.apiKey || ''
+    }
     
     // Mock 模式：使用明文存储的 API Key
     if (!apiKey && provider._apiKeyPlain) {
       apiKey = provider._apiKeyPlain
     }
     
-    // 如果还是没有 API Key，尝试使用环境变量
-    if (!apiKey && process.env.ARK_API_KEY && process.env.ARK_API_KEY !== 'your-volcengine-ark-api-key') {
-      apiKey = process.env.ARK_API_KEY
+    if (!apiKey || apiKey === 'your-ark-api-key') {
+      return { ok: false, error: '未配置有效的 API Key，请在 .env 中设置 ARK_API_KEY' }
     }
     
-    if (!apiKey) {
-      return { ok: false, error: '未配置有效的 API Key，请重新添加 AI 配置' }
-    }
+    console.log('[AI测试] 使用 API Key:', apiKey.substring(0, 8) + '...')
 
     const testPrompt = '请只回复：连接成功'
     const body = {
