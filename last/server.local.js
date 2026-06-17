@@ -734,34 +734,30 @@ const server = http.createServer(async (req, res) => {
 
       const userMessage = newMessages[newMessages.length - 1]
 
-      // MOCK 模式：直接返回模拟回复
-      if (USE_MOCK) {
-        console.log('[API-CHAT] MOCK 模式，返回模拟回复')
-        const mockReply = `收到你的消息："${userMessage.content}"\n\n这是 MOCK 模式下的模拟回复，AI 功能正常工作！`
-        
-        // 保存用户消息和 AI 回复到 mock 存储
-        const chat = mockChats.find(c => c.id === chatId)
-        if (chat) {
-          chat.messages = chat.messages || []
-          chat.messages.push({ 
-            ...userMessage, 
-            id: `msg-${Date.now()}`, 
-            created_at: new Date().toISOString() 
-          })
-          chat.messages.push({
-            role: 'assistant',
-            content: mockReply,
-            id: `msg-${Date.now() + 1}`,
-            created_at: new Date().toISOString()
-          })
-          chat.updated_at = new Date().toISOString()
-          writeStorage('chats', mockChats)
-        }
-        
-        return sendJson(res, 200, { reply: mockReply, toolResults: [] })
-      }
-
       try {
+        // MOCK 模式下也调用真实 AI（因为 AI 测试已成功）
+        if (USE_MOCK) {
+          console.log('[API-CHAT] MOCK 模式，调用真实 AI')
+          
+          // 直接调用 AI
+          const aiReply = await callAIProvider(null, newMessages)
+          
+          // 保存用户消息和 AI 回复到 mock 存储
+          const chat = mockChats.find(c => c.id === chatId)
+          if (chat) {
+            chat.messages = chat.messages || []
+            chat.messages.push({ 
+              role: 'assistant',
+              content: aiReply,
+              id: `msg-${Date.now()}`,
+              created_at: new Date().toISOString()
+            })
+            chat.updated_at = new Date().toISOString()
+            writeStorage('chats', mockChats)
+          }
+          
+          return sendJson(res, 200, { reply: aiReply, toolResults: [] })
+        }
         // 步骤一：保存用户消息到数据库
         const savedUserMsg = await supabaseCreateMessage({
           chat_id: chatId,
