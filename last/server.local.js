@@ -880,9 +880,9 @@ ${fullSystemPrompt}
             const allMessages = chat.messages
             const messageCount = allMessages.length
             
-            // 每 20 轮对话触发一次记忆压缩
-            const compressThreshold = 20
-            const keepRecent = 5
+            // 从设置面板读取压缩参数
+            const compressThreshold = parseInt(await supabaseGetSetting('keep_recent_messages') || '10') * 2
+            const keepRecent = parseInt(await supabaseGetSetting('keep_recent_messages') || '10')
             
             if (messageCount >= compressThreshold && messageCount % compressThreshold === 0) {
               console.log(`[记忆压缩] 对话已达 ${messageCount} 轮，开始压缩记忆...`)
