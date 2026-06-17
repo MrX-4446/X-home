@@ -772,24 +772,30 @@ const server = http.createServer(async (req, res) => {
             console.warn('[BASE-RULES] 底层规则文件读取失败:', err.message)
           }
 
-          const userSystemPrompt = await supabaseGetSetting('system_prompt') || '你是一个智能助手，乐于助人，回答准确。'
-          const baseSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}` : userSystemPrompt
+          const userSystemPrompt = await supabaseGetSetting('system_prompt') || ''
+          const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}` : userSystemPrompt
 
-          // 组装完整消息：系统提示词 + 用户消息
+          // 组装完整消息
           const fullMessages = []
           
-          // 强制添加系统提示词（确保生效）
-          fullMessages.push({ role: 'system', content: baseSystemPrompt })
+          // 方法：把系统提示词放在第一条用户消息中（DeepSeek 对 system 消息支持可能有问题）
+          let firstMessageProcessed = false
           
-          // 添加历史消息（排除前端可能传递的 system 消息，避免重复）
           newMessages.forEach(msg => {
             if (msg.role !== 'system') {
-              fullMessages.push(msg)
+              if (!firstMessageProcessed && msg.role === 'user') {
+                // 第一条用户消息，前缀加上系统提示词
+                const messageWithSystem = `【系统设定】\n${fullSystemPrompt}\n\n【用户消息】\n${msg.content}`
+                fullMessages.push({ role: 'user', content: messageWithSystem })
+                firstMessageProcessed = true
+              } else {
+                fullMessages.push(msg)
+              }
             }
           })
 
           console.log('[AI-CALL] 最终发送给 AI 的消息数量:', fullMessages.length)
-          console.log('[AI-CALL] 系统提示词长度:', baseSystemPrompt.length)
+          console.log('[AI-CALL] 系统提示词已嵌入第一条消息')
 
           // 调用 AI
           const aiReply = await callAIProvider(null, fullMessages)
