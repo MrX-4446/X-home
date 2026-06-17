@@ -753,11 +753,9 @@ const server = http.createServer(async (req, res) => {
     // ===== AI 对话 API =====
     if (pathname === '/api/chat' && req.method === 'POST') {
       const body = await readBody(req)
-      console.log('[API-CHAT] 收到请求体:', JSON.stringify(body, null, 2))
       const { chatId, messages: newMessages } = body
 
       if (!chatId || !newMessages || newMessages.length === 0) {
-        console.log('[API-CHAT] 参数校验失败: chatId=', chatId, ', newMessages=', newMessages)
         return sendJson(res, 400, { error: '缺少必要参数' })
       }
 
@@ -766,25 +764,8 @@ const server = http.createServer(async (req, res) => {
       try {
         // MOCK 模式下也调用真实 AI（因为 AI 测试已成功）
         if (USE_MOCK) {
-          console.log('[API-CHAT] MOCK 模式，调用真实 AI')
-          
-          // 直接调用 AI
+          // 直接调用 AI，不保存消息（由前端统一保存）
           const aiReply = await callAIProvider(null, newMessages)
-          
-          // 保存用户消息和 AI 回复到 mock 存储
-          const chat = mockChats.find(c => c.id === chatId)
-          if (chat) {
-            chat.messages = chat.messages || []
-            chat.messages.push({ 
-              role: 'assistant',
-              content: aiReply,
-              id: `msg-${Date.now()}`,
-              created_at: new Date().toISOString()
-            })
-            chat.updated_at = new Date().toISOString()
-            writeStorage('chats', mockChats)
-          }
-          
           return sendJson(res, 200, { reply: aiReply, toolResults: [] })
         }
         // 步骤一：保存用户消息到数据库
