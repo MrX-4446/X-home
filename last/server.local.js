@@ -81,6 +81,8 @@ async function testAIProvider(provider) {
     }
     
     console.log('[AI测试] 使用 API Key:', apiKey.substring(0, 8) + '...')
+    console.log('[AI测试] 调用端点:', provider.endpoint)
+    console.log('[AI测试] 使用模型:', provider.model)
 
     const testPrompt = '请只回复：连接成功'
     const body = {
@@ -90,25 +92,42 @@ async function testAIProvider(provider) {
       max_tokens: 32,
     }
 
-    const resp = await fetch(provider.endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(body),
-    })
+    console.log('[AI测试] 发送请求中...')
+    try {
+      // 添加超时处理
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 10000)
 
-    const data = await resp.json().catch(() => ({}))
+      const resp = await fetch(provider.endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      })
 
-    if (!resp.ok) {
-      const errorMsg = data?.error?.message || data?.message || `HTTP ${resp.status}`
-      return { ok: false, error: `连接失败: ${errorMsg}` }
+      clearTimeout(timeout)
+      console.log('[AI测试] 响应状态:', resp.status)
+
+      const data = await resp.json().catch(() => ({}))
+
+      if (!resp.ok) {
+        const errorMsg = data?.error?.message || data?.message || `HTTP ${resp.status}`
+        console.error('[AI测试] 调用失败:', errorMsg)
+        return { ok: false, error: `连接失败: ${errorMsg}` }
+      }
+
+      const reply = data?.choices?.[0]?.message?.content || ''
+      console.log('[AI测试] 调用成功，回复:', reply.substring(0, 50))
+      return { ok: true, reply: reply || '连接成功（无返回内容）' }
+    } catch (fetchErr) {
+      console.error('[AI测试] Fetch 错误:', fetchErr.message)
+      throw fetchErr
     }
-
-    const reply = data?.choices?.[0]?.message?.content || ''
-    return { ok: true, reply: reply || '连接成功（无返回内容）' }
   } catch (err) {
+    console.error('[AI测试] 错误详情:', err)
     return { ok: false, error: `网络错误: ${err.message}` }
   }
 }
