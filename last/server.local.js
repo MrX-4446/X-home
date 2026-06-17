@@ -784,8 +784,56 @@ const server = http.createServer(async (req, res) => {
 
           const userSystemPrompt = await supabaseGetSetting('system_prompt') || ''
           
-          // 获取当前时间上下文（让 AI 知道现在是什么时间）
+          // ========== 【新增】加载并浮现记忆 ==========
+          const allMemories = readStorage('memories') || []
+          const chatMemories = allMemories.filter(m => !m.chat_id || m.chat_id === chatId)
+          
+          // 简单的记忆评分和排序
           const now = new Date()
+          const decayRate = 0.01
+          
+          const scoredMemories = chatMemories.map(mem => {
+            const created = new Date(mem.created_at || mem.date || now)
+            const hoursSinceCreated = (now - created) / (1000 * 60 * 60)
+            const decay = Math.exp(-decayRate * hoursSinceCreated)
+            
+            const score = (mem.importance || 5) * 0.4 +
+                         (mem.activation_count || 0) * 0.2 +
+                         decay * 0.4
+            
+            return { ...mem, score }
+          })
+          
+          // 排序：置顶优先，然后按评分，取前 5 条
+          const sortedMemories = scoredMemories.sort((a, b) => {
+            if (a.is_pinned && !b.is_pinned) return -1
+            if (!a.is_pinned && b.is_pinned) return 1
+            return b.score - a.score
+          }).slice(0, 5)
+          
+          // 构建记忆摘要，并更新被检索到的记忆的激活次数
+          let memoryContext = ''
+          if (sortedMemories.length > 0) {
+            memoryContext = `\n【重要记忆回顾】
+以下是你需要记住的关于轩的重要信息（恋人X的视角）：
+${sortedMemories.map((m, i) => `${i + 1}. ${m.content}`).join('\n')}
+请在对话中自然地运用这些记忆。
+`
+            console.log(`[记忆加载] 成功加载 ${sortedMemories.length} 条记忆`)
+            
+            // 更新这些记忆的激活次数（被检索到就 +1）
+            const allMemories = readStorage('memories') || []
+            sortedMemories.forEach(retrievedMem => {
+              const idx = allMemories.findIndex(m => m.id === retrievedMem.id)
+              if (idx !== -1) {
+                allMemories[idx].activation_count = (allMemories[idx].activation_count || 0) + 1
+                allMemories[idx].updated_at = new Date().toISOString()
+              }
+            })
+            writeStorage('memories', allMemories)
+          }
+          
+          // 获取当前时间上下文（让 AI 知道现在是什么时间）
           const hour = now.getHours()
           let timeOfDay = ''
           if (hour >= 5 && hour < 9) timeOfDay = '清晨'
@@ -801,7 +849,7 @@ const server = http.createServer(async (req, res) => {
 时间段：${timeOfDay}
 请根据当前时间上下文，自然地与用户交流，比如深夜可以关心对方"这么晚还没睡呀"，早上可以说"早安"等。
 `
-          const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}\n\n${timeContext}` : userSystemPrompt
+          const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}\n\n${memoryContext}\n\n${timeContext}` : userSystemPrompt
 
           // 【关键修复】创建消息副本，不修改原始消息（避免污染数据库）
           const messagesCopy = newMessages
