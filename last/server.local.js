@@ -764,8 +764,31 @@ const server = http.createServer(async (req, res) => {
       try {
         // MOCK 模式下也调用真实 AI（因为 AI 测试已成功）
         if (USE_MOCK) {
-          // 直接调用 AI，不保存消息（由前端统一保存）
-          const aiReply = await callAIProvider(null, newMessages)
+          // 加载底层规则文件（所有 AI 必须遵守）
+          let baseRules = ''
+          try {
+            baseRules = fs.readFileSync(path.join(__dirname, 'base-rules.md'), 'utf-8')
+          } catch (err) {
+            console.warn('[BASE-RULES] 底层规则文件读取失败:', err.message)
+          }
+
+          const userSystemPrompt = await supabaseGetSetting('system_prompt') || '你是一个智能助手，乐于助人，回答准确。'
+          const baseSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}` : userSystemPrompt
+
+          // 组装完整消息：系统提示词 + 用户消息
+          const fullMessages = []
+          if (baseSystemPrompt) {
+            fullMessages.push({ role: 'system', content: baseSystemPrompt })
+          }
+          // 添加历史消息
+          newMessages.slice(0, -1).forEach(msg => {
+            fullMessages.push(msg)
+          })
+          // 添加最后一条用户消息
+          fullMessages.push(newMessages[newMessages.length - 1])
+
+          // 调用 AI
+          const aiReply = await callAIProvider(null, fullMessages)
           return sendJson(res, 200, { reply: aiReply, toolResults: [] })
         }
         // 步骤一：保存用户消息到数据库
