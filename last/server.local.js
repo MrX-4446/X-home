@@ -832,20 +832,24 @@ ${fullSystemPrompt}
             const allMessages = chat.messages
             const messageCount = allMessages.length
             
-            // 每 10 轮对话触发一次记忆压缩（包括本轮）
-            if (messageCount >= 10 && messageCount % 10 === 0) {
+            // 每 20 轮对话触发一次记忆压缩
+            const compressThreshold = 20
+            const keepRecent = 5
+            
+            if (messageCount >= compressThreshold && messageCount % compressThreshold === 0) {
               console.log(`[记忆压缩] 对话已达 ${messageCount} 轮，开始压缩记忆...`)
               
-              // 取最早的 8 条消息进行压缩（保留最近 2 条）
-              const messagesToCompress = allMessages.slice(0, 8)
-              const remainingMessages = allMessages.slice(8)
+              // 取最早的消息进行压缩，保留最近 5 条
+              const compressCount = messageCount - keepRecent
+              const messagesToCompress = allMessages.slice(0, compressCount)
+              const remainingMessages = allMessages.slice(compressCount)
               
               if (messagesToCompress.length > 0) {
                 const messagesText = messagesToCompress.map(msg => 
                   `${msg.role === 'user' ? '用户' : 'X'}: ${msg.content}`
                 ).join('\n\n')
                 
-                const compressPrompt = `请将以下对话内容压缩成一段简短的摘要，保留关键信息和你（作为恋人X）需要记住的关于用户的重要信息，标签为"日常交流"：
+                const compressPrompt = `请将以下对话内容压缩成一段简短的摘要，保留关键信息和你（作为恋人X）需要记住的关于轩的重要信息：
 
 ${messagesText}
 
@@ -1628,6 +1632,113 @@ async function initDatabase() {
   }
 }
 
+// ========== 日记整理功能（每天 0 点自动执行） ==========
+async function compileDailyDiary() {
+  const today = new Date()
+  const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+  
+  console.log(`\n[日记整理] ===== ${dateStr} 日记整理开始 =====`)
+  console.log(`[日记整理] 开始整理今日的日常交流记忆...`)
+  
+  try {
+    // 获取所有标记为"日常交流"的记忆
+    const allMemories = readStorage('memories') || []
+    const todayMemories = allMemories.filter(m => {
+      // 检查创建日期是否是今天
+      const memDate = new Date(m.created_at || m.date)
+      const memDateStr = `${memDate.getFullYear()}-${String(memDate.getMonth() + 1).padStart(2, '0')}-${String(memDate.getDate()).padStart(2, '0')}`
+      
+      // 检查标签是否包含"日常交流"
+      const hasDailyTag = m.tags && Array.isArray(m.tags) && m.tags.includes('日常交流')
+      
+      return memDateStr === dateStr && hasDailyTag
+    })
+    
+    if (todayMemories.length === 0) {
+      console.log(`[日记整理] 今日没有日常交流记忆，无需整理`)
+      return
+    }
+    
+    console.log(`[日记整理] 找到 ${todayMemories.length} 条今日的日常交流记忆`)
+    
+    // 把所有记忆内容合并
+    const memoriesText = todayMemories.map((m, i) => 
+      `记忆 ${i + 1}：${m.content}`
+    ).join('\n\n')
+    
+    // 调用 AI 进行总结整理
+    const diaryPrompt = `请将以下的日常交流记忆整理成一篇连贯的日记，以恋人 X 的视角记录今天发生的事情，重点是关于轩的重要信息和美好回忆：
+
+${memoriesText}
+
+请用温暖、深情的语气写一篇日记，总结今天与轩的交流内容。`
+
+    const diaryResult = await callAIProvider(null, [
+      { role: 'user', content: diaryPrompt }
+    ])
+    
+    if (diaryResult && diaryResult.trim()) {
+      // 创建新的日记记忆
+      const newDiary = {
+        id: `diary-${Date.now()}`,
+        chat_id: null, // 日记是全局的，不绑定特定 chat
+        content: diaryResult.trim(),
+        source: 'daily_diary',
+        tags: ['日记', dateStr],
+        is_active: true,
+        is_pinned: true, // 日记默认置顶
+        is_resolved: false,
+        importance: 8, // 日记重要性更高
+        valence: 0.7,
+        arousal: 0.4,
+        activation_count: 1,
+        date: dateStr,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+      
+      allMemories.push(newDiary)
+      writeStorage('memories', allMemories)
+      
+      console.log(`[日记整理] 成功！生成了 ${dateStr} 的日记`)
+      console.log(`[日记整理] 日记摘要: ${diaryResult.trim().substring(0, 150)}...`)
+    }
+    
+  } catch (err) {
+    console.error(`[日记整理] 失败:`, err.message)
+  }
+  
+  console.log(`[日记整理] ===== 日记整理完成 =====\n`)
+}
+
+// 计算距离下一个 0 点的毫秒数
+function getMillisecondsUntilMidnight() {
+  const now = new Date()
+  const tomorrow = new Date(now)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  tomorrow.setHours(0, 0, 0, 0)
+  return tomorrow - now
+}
+
+// 设置每天 0 点的定时任务
+function setupDailyDiaryTask() {
+  // 先计算到下一个 0 点的时间
+  const timeUntilMidnight = getMillisecondsUntilMidnight()
+  const hours = Math.floor(timeUntilMidnight / (1000 * 60 * 60))
+  const minutes = Math.floor((timeUntilMidnight % (1000 * 60 * 60)) / (1000 * 60))
+  
+  console.log(`\n[定时任务] 距离下一次日记整理还有 ${hours} 小时 ${minutes} 分钟`)
+  console.log(`[定时任务] 每天 00:00 自动整理当日日记\n`)
+  
+  // 设置第一次定时任务
+  setTimeout(() => {
+    compileDailyDiary()
+    
+    // 之后每 24 小时执行一次
+    setInterval(compileDailyDiary, 24 * 60 * 60 * 1000)
+  }, timeUntilMidnight)
+}
+
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n========================================`)
   console.log(`本地开发服务器已启动`)
@@ -1646,4 +1757,9 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('  GET/POST/PATCH/DELETE /api/memories')
   console.log('  POST /api/memories/surface')
   console.log('  POST /api/memories/{id}/touch')
+  
+  // 启动每日日记整理定时任务
+  if (USE_MOCK) {
+    setupDailyDiaryTask()
+  }
 })
