@@ -1687,10 +1687,16 @@ async function initDatabase() {
   }
 }
 
+// 获取北京时间的日期字符串 YYYY-MM-DD
+function getBeijingDateStr() {
+  const now = new Date()
+  const beijingTime = new Date(now.getTime() + 8 * 60 * 60 * 1000)
+  return `${beijingTime.getUTCFullYear()}-${String(beijingTime.getUTCMonth() + 1).padStart(2, '0')}-${String(beijingTime.getUTCDate()).padStart(2, '0')}`
+}
+
 // ========== 日记整理功能（每天 0 点自动执行） ==========
 async function compileDailyDiary() {
-  const today = new Date()
-  const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+  const dateStr = getBeijingDateStr()
   
   console.log(`\n[日记整理] ===== ${dateStr} 日记整理开始 =====`)
   console.log(`[日记整理] 开始整理今日的日常交流记忆...`)
@@ -1699,9 +1705,11 @@ async function compileDailyDiary() {
     // 获取所有标记为"日常交流"的记忆
     const allMemories = readStorage('memories') || []
     const todayMemories = allMemories.filter(m => {
-      // 检查创建日期是否是今天
+      // 检查创建日期是否是今天（按北京时间）
       const memDate = new Date(m.created_at || m.date)
-      const memDateStr = `${memDate.getFullYear()}-${String(memDate.getMonth() + 1).padStart(2, '0')}-${String(memDate.getDate()).padStart(2, '0')}`
+      // 转换为北京时间
+      const memBeijingTime = new Date(memDate.getTime() + 8 * 60 * 60 * 1000)
+      const memDateStr = `${memBeijingTime.getUTCFullYear()}-${String(memBeijingTime.getUTCMonth() + 1).padStart(2, '0')}-${String(memBeijingTime.getUTCDate()).padStart(2, '0')}`
       
       // 检查标签是否包含"日常交流"
       const hasDailyTag = m.tags && Array.isArray(m.tags) && m.tags.includes('日常交流')
@@ -1766,32 +1774,36 @@ ${memoriesText}
   console.log(`[日记整理] ===== 日记整理完成 =====\n`)
 }
 
-// 计算距离下一个 0 点的毫秒数
-function getMillisecondsUntilMidnight() {
+// 获取当前北京时间的小时（UTC+8）
+function getBeijingHour() {
   const now = new Date()
-  const tomorrow = new Date(now)
-  tomorrow.setDate(tomorrow.getDate() + 1)
-  tomorrow.setHours(0, 0, 0, 0)
-  return tomorrow - now
+  // 转换为北京时间（UTC+8）
+  const beijingTime = new Date(now.getTime() + 8 * 60 * 60 * 1000)
+  return beijingTime.getUTCHours()
 }
 
-// 设置每天 0 点的定时任务
+// 判断是否是北京时间的 0 点
+function isBeijingMidnight() {
+  return getBeijingHour() === 0
+}
+
+// 设置每天 0 点（北京时间）的定时任务
 function setupDailyDiaryTask() {
-  // 先计算到下一个 0 点的时间
-  const timeUntilMidnight = getMillisecondsUntilMidnight()
-  const hours = Math.floor(timeUntilMidnight / (1000 * 60 * 60))
-  const minutes = Math.floor((timeUntilMidnight % (1000 * 60 * 60)) / (1000 * 60))
+  console.log(`\n[定时任务] 已启动日记整理定时任务（北京时间 00:00 执行）\n`)
   
-  console.log(`\n[定时任务] 距离下一次日记整理还有 ${hours} 小时 ${minutes} 分钟`)
-  console.log(`[定时任务] 每天 00:00 自动整理当日日记\n`)
+  let lastRunDate = null
   
-  // 设置第一次定时任务
-  setTimeout(() => {
-    compileDailyDiary()
+  // 每小时检查一次，如果是北京时间 0 点且今天没执行过，就执行
+  setInterval(() => {
+    const now = new Date()
+    const todayStr = now.toISOString().split('T')[0] // YYYY-MM-DD
     
-    // 之后每 24 小时执行一次
-    setInterval(compileDailyDiary, 24 * 60 * 60 * 1000)
-  }, timeUntilMidnight)
+    if (isBeijingMidnight() && lastRunDate !== todayStr) {
+      console.log(`\n[定时任务] ===== 到达北京时间 00:00，开始整理日记 =====\n`)
+      compileDailyDiary()
+      lastRunDate = todayStr
+    }
+  }, 60 * 60 * 1000) // 每小时检查一次
 }
 
 server.listen(PORT, '0.0.0.0', () => {
