@@ -783,19 +783,24 @@ const server = http.createServer(async (req, res) => {
 
           const userSystemPrompt = await supabaseGetSetting('system_prompt') || ''
           
-          // 添加工具调用能力
-          const toolsInfo = `
-【可用工具】你可以使用以下工具（根据需要调用）：
-1. 系统时间 - 获取当前系统时间和日期
-   调用格式：{"tool":"系统时间","params":{}}
-   使用场景：当需要知道当前时间、日期、星期几时调用
-
-工具调用规则：
-- 直接输出 JSON 格式的工具调用指令
-- 可以连续调用多个工具，用换行分隔
-- 如果不需要工具，直接回答用户问题即可
+          // 获取当前时间上下文（让 AI 知道现在是什么时间）
+          const now = new Date()
+          const hour = now.getHours()
+          let timeOfDay = ''
+          if (hour >= 5 && hour < 9) timeOfDay = '清晨'
+          else if (hour >= 9 && hour < 12) timeOfDay = '上午'
+          else if (hour >= 12 && hour < 14) timeOfDay = '中午'
+          else if (hour >= 14 && hour < 18) timeOfDay = '下午'
+          else if (hour >= 18 && hour < 22) timeOfDay = '晚上'
+          else if (hour >= 22 || hour < 5) timeOfDay = '深夜/凌晨'
+          
+          const timeContext = `
+【当前时间上下文】
+现在是：${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 星期${['日', '一', '二', '三', '四', '五', '六'][now.getDay()]} ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}
+时间段：${timeOfDay}
+请根据当前时间上下文，自然地与用户交流，比如深夜可以关心对方"这么晚还没睡呀"，早上可以说"早安"等。
 `
-          const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}\n\n${toolsInfo}` : userSystemPrompt
+          const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}\n\n${timeContext}` : userSystemPrompt
 
           // 【关键修复】创建消息副本，不修改原始消息（避免污染数据库）
           const messagesCopy = newMessages
@@ -818,48 +823,8 @@ ${fullSystemPrompt}
           }
 
           // 调用 AI（使用副本，不影响原始数据库消息）
-          let aiReply = await callAIProvider(null, messagesCopy)
-          
-          // 【新增】处理工具调用（检查 AI 回复中是否有工具调用指令）
-          const toolResults = []
-          const toolCallRegex = /\{"tool":"([^"]+)","params":\{([^}]*)\}\}/g
-          let match
-          
-          while ((match = toolCallRegex.exec(aiReply)) !== null) {
-            const toolName = match[1]
-            console.log('[TOOL-CALL] 检测到工具调用:', toolName)
-            
-            if (toolName === '系统时间') {
-              // 执行系统时间工具
-              const now = new Date()
-              const result = {
-                tool: '系统时间',
-                success: true,
-                result: {
-                  year: now.getFullYear(),
-                  month: now.getMonth() + 1,
-                  day: now.getDate(),
-                  hour: now.getHours(),
-                  minute: now.getMinutes(),
-                  second: now.getSeconds(),
-                  weekday: ['日', '一', '二', '三', '四', '五', '六'][now.getDay()],
-                  fullText: `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 星期${['日', '一', '二', '三', '四', '五', '六'][now.getDay()]} ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`
-                }
-              }
-              toolResults.push(result)
-              console.log('[TOOL-CALL] 系统时间执行结果:', result.result.fullText)
-            }
-          }
-          
-          // 如果有工具调用结果，把结果告知 AI，让它重新组织语言
-          if (toolResults.length > 0) {
-            const resultText = toolResults.map(r => `工具执行结果：${JSON.stringify(r.result)}`).join('\n')
-            messagesCopy.push({ role: 'assistant', content: aiReply })
-            messagesCopy.push({ role: 'user', content: `【工具执行结果】\n${resultText}\n\n请根据以上工具执行结果，用自然语言回复用户。` })
-            aiReply = await callAIProvider(null, messagesCopy)
-          }
-
-          return sendJson(res, 200, { reply: aiReply, toolResults: toolResults })
+          const aiReply = await callAIProvider(null, messagesCopy)
+          return sendJson(res, 200, { reply: aiReply, toolResults: [] })
         }
         // 步骤一：保存用户消息到数据库
         const savedUserMsg = await supabaseCreateMessage({
