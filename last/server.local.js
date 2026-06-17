@@ -775,27 +775,24 @@ const server = http.createServer(async (req, res) => {
           const userSystemPrompt = await supabaseGetSetting('system_prompt') || ''
           const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}` : userSystemPrompt
 
-          // 组装完整消息
+          // 组装完整消息：每轮对话都在最前面加上系统提示词
           const fullMessages = []
           
-          // 方法：把系统提示词放在第一条用户消息中（DeepSeek 对 system 消息支持可能有问题）
-          let firstMessageProcessed = false
+          // 1. 先添加系统提示词（用 user 角色，确保 DeepSeek 识别）
+          fullMessages.push({ 
+            role: 'user', 
+            content: `【重要设定】\n${fullSystemPrompt}\n\n现在请你按照以上设定回复用户：`
+          })
           
+          // 2. 添加历史消息（排除 system 消息）
           newMessages.forEach(msg => {
             if (msg.role !== 'system') {
-              if (!firstMessageProcessed && msg.role === 'user') {
-                // 第一条用户消息，前缀加上系统提示词
-                const messageWithSystem = `【系统设定】\n${fullSystemPrompt}\n\n【用户消息】\n${msg.content}`
-                fullMessages.push({ role: 'user', content: messageWithSystem })
-                firstMessageProcessed = true
-              } else {
-                fullMessages.push(msg)
-              }
+              fullMessages.push(msg)
             }
           })
 
           console.log('[AI-CALL] 最终发送给 AI 的消息数量:', fullMessages.length)
-          console.log('[AI-CALL] 系统提示词已嵌入第一条消息')
+          console.log('[AI-CALL] 系统提示词已添加到对话开头')
 
           // 调用 AI
           const aiReply = await callAIProvider(null, fullMessages)
