@@ -292,11 +292,11 @@ export async function executeCode(code) {
  * @param {{system?: string, messages: Array<{role,content}>}} params
  * @returns {Promise<string>} AI 回复文本（失败返回错误说明）
  */
-export async function chatWithAI({ system, messages, model, temperature, maxTokens, topP, deepThinking, tools }) {
+export async function chatWithAI({ chatId, system, messages, model, temperature, maxTokens, topP, deepThinking, tools }) {
   try {
     const res = await request('/api/chat', {
       method: 'POST',
-      body: JSON.stringify({ system, messages, model, temperature, maxTokens, topP, deepThinking, tools }),
+      body: JSON.stringify({ chatId, system, messages, model, temperature, maxTokens, topP, deepThinking, tools }),
     })
     return {
       reply: res?.reply || '',
