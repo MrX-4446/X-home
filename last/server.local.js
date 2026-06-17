@@ -135,6 +135,7 @@ async function testAIProvider(provider) {
 // Mock 数据
 const mockChats = readStorage('chats') || []
 const mockAIProviders = readStorage('ai-providers') || []
+const mockMemories = readStorage('memories') || []
 const mockTools = readStorage('tools') || [
   { id: 'tool-1', name: '网页搜索', description: '实时搜索互联网信息', iconKey: '搜索', enabled: true, category: '搜索', type: 'cloud' },
   { id: 'tool-2', name: '计算器', description: '执行数学计算', iconKey: '计算器', enabled: true, category: '工具', type: 'tool' },
@@ -824,6 +825,72 @@ ${fullSystemPrompt}
 
           // 调用 AI（使用副本，不影响原始数据库消息）
           const aiReply = await callAIProvider(null, messagesCopy)
+          
+          // ========== 【新增】MOCK 模式下的记忆压缩 ==========
+          const chat = mockChats.find(c => c.id === chatId)
+          if (chat && chat.messages) {
+            const allMessages = chat.messages
+            const messageCount = allMessages.length
+            
+            // 每 10 轮对话触发一次记忆压缩（包括本轮）
+            if (messageCount >= 10 && messageCount % 10 === 0) {
+              console.log(`[记忆压缩] 对话已达 ${messageCount} 轮，开始压缩记忆...`)
+              
+              // 取最早的 8 条消息进行压缩（保留最近 2 条）
+              const messagesToCompress = allMessages.slice(0, 8)
+              const remainingMessages = allMessages.slice(8)
+              
+              if (messagesToCompress.length > 0) {
+                const messagesText = messagesToCompress.map(msg => 
+                  `${msg.role === 'user' ? '用户' : 'X'}: ${msg.content}`
+                ).join('\n\n')
+                
+                const compressPrompt = `请将以下对话内容压缩成一段简短的摘要，保留关键信息和你（作为恋人X）需要记住的关于用户的重要信息，标签为"日常交流"：
+
+${messagesText}
+
+请用简洁的语言总结上述对话，突出需要记住的用户信息。`
+
+                try {
+                  const summaryResult = await callAIProvider(null, [
+                    { role: 'user', content: compressPrompt }
+                  ])
+                  
+                  if (summaryResult && summaryResult.trim()) {
+                    const newMemory = {
+                      id: `memory-${Date.now()}`,
+                      chat_id: chatId,
+                      content: summaryResult.trim(),
+                      source: 'compression',
+                      tags: ['日常交流'],
+                      is_active: true,
+                      is_pinned: false,
+                      is_resolved: false,
+                      importance: 5,
+                      valence: 0.5,
+                      arousal: 0.3,
+                      activation_count: 1,
+                      created_at: new Date().toISOString(),
+                      updated_at: new Date().toISOString(),
+                    }
+                    
+                    mockMemories.push(newMemory)
+                    writeStorage('memories', mockMemories)
+                    
+                    // 更新 chat 的消息列表（移除已压缩的消息）
+                    chat.messages = remainingMessages
+                    writeStorage('chats', mockChats)
+                    
+                    console.log(`[记忆压缩] 成功！${messagesToCompress.length} 条消息 -> 1 条记忆（日常交流）`)
+                    console.log(`[记忆压缩] 摘要内容: ${summaryResult.trim().substring(0, 100)}...`)
+                  }
+                } catch (err) {
+                  console.error('[记忆压缩] 失败:', err.message)
+                }
+              }
+            }
+          }
+          
           return sendJson(res, 200, { reply: aiReply, toolResults: [] })
         }
         // 步骤一：保存用户消息到数据库
