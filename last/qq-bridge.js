@@ -163,8 +163,10 @@ function saveSession(sessionId, sessionData) {
 
 // ========== 获取北京时间 ==========
 function getBeijingTime() {
+  // ✅ 正确的北京时间计算：基于 UTC 时间偏移
   const now = new Date()
-  return new Date(now.getTime() + 8 * 60 * 60 * 1000)
+  const utcTime = now.getTime() + now.getTimezoneOffset() * 60 * 1000
+  return new Date(utcTime + 8 * 60 * 60 * 1000)
 }
 
 function getTimeContext() {

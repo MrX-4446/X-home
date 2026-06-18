@@ -870,8 +870,10 @@ async function executeToolCall(toolCall, enabledTools) {
 
     if (toolName === '系统时间') {
       const format = args.format || 'full'
+      // ✅ 正确的北京时间计算：基于 UTC 时间偏移
       const now = new Date()
-      const beijingTime = new Date(now.getTime() + 8 * 60 * 60 * 1000)
+      const utcTime = now.getTime() + now.getTimezoneOffset() * 60 * 1000
+      const beijingTime = new Date(utcTime + 8 * 60 * 60 * 1000)
       const weekdays = ['日', '一', '二', '三', '四', '五', '六']
       
       let result = ''
@@ -1350,7 +1352,10 @@ ${sortedMemories.map((m, i) => `${i + 1}. ${m.content}`).join('\n')}
           }
           
           // 获取当前时间上下文（让 AI 知道现在是什么时间）
-          const hour = now.getHours()
+          // ✅ 使用正确的北京时间（UTC+8）
+          const utcTime = now.getTime() + now.getTimezoneOffset() * 60 * 1000
+          const beijingNow = new Date(utcTime + 8 * 60 * 60 * 1000)
+          const hour = beijingNow.getHours()
           let timeOfDay = ''
           if (hour >= 5 && hour < 9) timeOfDay = '清晨'
           else if (hour >= 9 && hour < 12) timeOfDay = '上午'
@@ -1361,7 +1366,7 @@ ${sortedMemories.map((m, i) => `${i + 1}. ${m.content}`).join('\n')}
           
           const timeContext = `
 【当前时间上下文】
-现在是：${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 星期${['日', '一', '二', '三', '四', '五', '六'][now.getDay()]} ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}
+现在是：${beijingNow.getFullYear()}年${beijingNow.getMonth() + 1}月${beijingNow.getDate()}日 星期${['日', '一', '二', '三', '四', '五', '六'][beijingNow.getDay()]} ${beijingNow.getHours().toString().padStart(2, '0')}:${beijingNow.getMinutes().toString().padStart(2, '0')}
 时间段：${timeOfDay}
 请根据当前时间上下文，自然地与用户交流，比如深夜可以关心对方"这么晚还没睡呀"，早上可以说"早安"等。
 `
