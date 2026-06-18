@@ -669,6 +669,7 @@ async function handleOneBotMessage(ws, payload) {
   if (!shouldHandleMessage(payload)) return
   
   let text = extractTextMessage(message)
+  const originalLength = text.length  // 保存原始消息长度，用于日志记录
   
   if (CONFIG.TRIGGER_PREFIX && text.startsWith(CONFIG.TRIGGER_PREFIX)) {
     text = text.slice(CONFIG.TRIGGER_PREFIX.length).trim()
