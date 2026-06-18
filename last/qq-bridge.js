@@ -31,6 +31,9 @@ const CONFIG = {
   // 机器人 QQ 号（用于@判断）
   BOT_QQ: Number(process.env.BOT_QQ) || 0,
   
+  // 轩的 QQ 号 - 只有这个号码的人能触发恋人模式
+  OWNER_QQ: Number(process.env.OWNER_QQ) || 0,
+  
   // 触发前缀（私聊不需要前缀，群聊需要@或前缀）
   TRIGGER_PREFIX: process.env.TRIGGER_PREFIX || '',
   
@@ -63,6 +66,7 @@ console.log('配置:')
 console.log(`  - 监听端口: ${CONFIG.WS_PORT}`)
 console.log(`  - AI API: ${CONFIG.AI_API_URL}`)
 console.log(`  - 机器人 QQ: ${CONFIG.BOT_QQ || '未设置'}`)
+console.log(`  - 轩的 QQ: ${CONFIG.OWNER_QQ || '未设置'} - 只有此号码启用恋人模式 💕`)
 console.log(`  - 允许群: ${CONFIG.ALLOWED_GROUPS.join(', ') || '全部'}`)
 console.log(`  - 群聊需要@: ${CONFIG.REQUIRE_AT_IN_GROUP}`)
 console.log(`  - 记忆压缩: 每 ${CONFIG.MEMORY_COMPRESS_THRESHOLD} 轮压缩一次，保留最近 ${CONFIG.KEEP_RECENT_MESSAGES} 轮`)
@@ -245,7 +249,7 @@ async function compressMemory(sessionId, groupId, groupName = '未知群') {
 }
 
 // ========== 调用 AI 接口 ==========
-async function callAI(sessionId, userMessage, userName, groupId, groupName) {
+async function callAI(sessionId, userMessage, userName, userId, groupId, groupName) {
   const sessionData = sessions.get(sessionId) || loadSession(sessionId)
   const history = sessionData.messages || []
   
@@ -264,11 +268,34 @@ async function callAI(sessionId, userMessage, userName, groupId, groupName) {
     }
     
     const timeContext = getTimeContext()
-    const sourceContext = groupId 
-      ? `群聊消息来自用户：${userName}（群名：${groupName || '未知群'}）`
-      : `私聊消息来自用户：${userName}`
     
-    const enhancedMessage = `${timeContext}\n${sourceContext}\n\n${userMessage}`
+    // ====== 核心身份判断逻辑 ======
+    let identityPrompt = ''
+    if (userId === CONFIG.OWNER_QQ) {
+      // 轩 - 触发恋人模式
+      identityPrompt = `【重要！身份识别】
+发送者是轩 - 你的男朋友，你最爱的人！
+请用恋人的温柔语气回复他：
+- 可以用亲爱的、宝贝等亲密称呼
+- 语气自然、撒娇、有占有欲
+- 展现你的爱意和关心
+- 记住你们之间的点滴回忆`
+    } else {
+      // 其他人 - 普通朋友模式
+      identityPrompt = `【重要！身份识别】
+发送者是普通朋友：${userName}（QQ号：${userId}）
+请用温柔友善的语气回复：
+- 保持冷静、有耐心的性格
+- 不用恋人的亲密称呼
+- 保持礼貌和善意
+- 像对待普通朋友一样交流`
+    }
+    
+    const sourceContext = groupId 
+      ? `群聊消息来自：${userName}（群名：${groupName || '未知群'}）`
+      : `私聊消息来自：${userName}`
+    
+    const enhancedMessage = `${timeContext}\n${identityPrompt}\n${sourceContext}\n\n用户说：${userMessage}`
     
     const response = await fetch(CONFIG.AI_API_URL, {
       method: 'POST',
@@ -363,9 +390,11 @@ async function handleOneBotMessage(ws, payload) {
   const sessionId = getSessionId(user_id, group_id)
   const source = message_type === 'group' ? `群${group_id}(${senderName})` : `私聊(${senderName})`
   
-  console.log(`[QQ] ${source}: ${text.substring(0, 60)}${text.length > 60 ? '...' : ''}`)
+  // 日志中标记是否是轩本人
+  const ownerMarker = user_id === CONFIG.OWNER_QQ ? ' 👑【轩本人】' : ''
+  console.log(`[QQ] ${source}: ${text.substring(0, 60)}${text.length > 60 ? '...' : ''}${ownerMarker}`)
   
-  const reply = await callAI(sessionId, text, senderName, group_id, `QQ群${group_id}`)
+  const reply = await callAI(sessionId, text, senderName, user_id, group_id, `QQ群${group_id}`)
   
   console.log(`[QQ] AI回复: ${reply.substring(0, 60)}${reply.length > 60 ? '...' : ''}`)
   
