@@ -157,6 +157,29 @@ function shouldHandleMessage(msg) {
   return false
 }
 
+// ========== 获取北京时间 ==========
+function getBeijingTime() {
+  const now = new Date()
+  const beijingTime = new Date(now.getTime() + 8 * 60 * 60 * 1000)
+  return beijingTime
+}
+
+function getTimeContext() {
+  const time = getBeijingTime()
+  const hour = time.getUTCHours()
+  const weekdays = ['日', '一', '二', '三', '四', '五', '六']
+  
+  let timeOfDay = ''
+  if (hour >= 5 && hour < 9) timeOfDay = '清晨'
+  else if (hour >= 9 && hour < 12) timeOfDay = '上午'
+  else if (hour >= 12 && hour < 14) timeOfDay = '中午'
+  else if (hour >= 14 && hour < 18) timeOfDay = '下午'
+  else if (hour >= 18 && hour < 22) timeOfDay = '晚上'
+  else timeOfDay = '深夜/凌晨'
+  
+  return `当前时间（北京时间）：${time.getUTCFullYear()}年${time.getUTCMonth() + 1}月${time.getUTCDate()}日 星期${weekdays[time.getUTCDay()]} ${time.getUTCHours().toString().padStart(2, '0')}:${time.getUTCMinutes().toString().padStart(2, '0')}，${timeOfDay}`
+}
+
 // ========== 调用 AI 接口 ==========
 async function callAI(sessionId, userMessage) {
   const history = sessions.get(sessionId) || loadSession(sessionId)
@@ -167,12 +190,15 @@ async function callAI(sessionId, userMessage) {
       headers['Authorization'] = `Bearer ${CONFIG.AI_API_KEY}`
     }
     
+    const timeContext = getTimeContext()
+    const enhancedMessage = `${timeContext}\n\n用户说：${userMessage}\n\n请用中文回复。`
+    
     const response = await fetch(CONFIG.AI_API_URL, {
       method: 'POST',
       headers: headers,
       body: JSON.stringify({
         chatId: sessionId,
-        messages: [...history, { role: 'user', content: userMessage }],
+        messages: [...history, { role: 'user', content: enhancedMessage }],
       }),
     })
     
