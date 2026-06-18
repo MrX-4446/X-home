@@ -22,6 +22,15 @@ const CONFIG = {
   // 如果远程 API 需要认证（可选）
   AI_API_KEY: process.env.AI_API_KEY || '',
   
+  // ===== 辅助AI配置（专门做摘要/压缩等后台任务）=====
+  // 用低成本模型做脏活累活，不影响主AI人设
+  HELPER_API_URL: process.env.HELPER_API_URL || 'http://localhost:8888/api/chat',
+  HELPER_API_KEY: process.env.HELPER_API_KEY || '',
+  HELPER_MODEL: process.env.HELPER_MODEL || 'default',
+  
+  // 触发AI摘要的阈值，短消息用规则压缩省token
+  AI_SUMMARY_THRESHOLD: 300,  // >300字才调用AI摘要
+  
   // 允许的群号（留空表示允许所有群）
   ALLOWED_GROUPS: (process.env.ALLOWED_GROUPS || '').split(',').filter(Boolean).map(Number),
   
@@ -77,7 +86,9 @@ console.log('  ✅ [优化2] 时间格式: 精简50%长度')
 console.log('  ✅ [优化3] 用户消息: 限制500字/条')
 console.log('  ✅ [优化4] AI回复: 限制800字/条')
 console.log('  ✅ [优化5] 上下文: 标签化精简格式')
-console.log('  💰 预计总节省: 40%-60% Token')
+console.log('  ✅ [优化6] 记忆压缩: 辅助AI智能摘要')
+console.log(`  � AI摘要阈值: >${CONFIG.AI_SUMMARY_THRESHOLD}字触发`)
+console.log('  �💰 预计总节省: 50%-70% Token')
 console.log('================================\n')
 
 // ========== 会话管理 ==========
@@ -199,6 +210,47 @@ function shouldHandleMessage(msg) {
   return false
 }
 
+// ========== 辅助AI - 智能摘要（独立函数，不影响主AI人设）==========
+async function callHelperAIForSummary(text, maxLength = 100) {
+  // 文本太短，直接返回
+  if (text.length < CONFIG.AI_SUMMARY_THRESHOLD) {
+    return text.substring(0, maxLength) + (text.length > maxLength ? '...' : '')
+  }
+  
+  try {
+    const headers = { 'Content-Type': 'application/json' }
+    if (CONFIG.HELPER_API_KEY) {
+      headers['Authorization'] = `Bearer ${CONFIG.HELPER_API_KEY}`
+    }
+    
+    console.log(`[辅助AI] 开始智能摘要，原文${text.length}字`)
+    
+    const response = await fetch(CONFIG.HELPER_API_URL, {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify({
+        chatId: `helper_${Date.now()}`,
+        messages: [{
+          role: 'user',
+          content: `请将以下对话内容压缩成不超过${maxLength}字的摘要，保留关键信息和人物关系，不要任何多余解释：\n\n${text}`
+        }],
+      }),
+    })
+    
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    
+    const data = await response.json()
+    const summary = (data.reply || data.message || text.substring(0, maxLength)).trim()
+    console.log(`[辅助AI] 摘要完成，${text.length}字 → ${summary.length}字，节省${text.length - summary.length}字`)
+    return summary
+    
+  } catch (err) {
+    console.error('[辅助AI] 摘要失败，降级为规则压缩:', err.message)
+    // 降级方案：简单规则压缩
+    return text.substring(0, maxLength) + (text.length > maxLength ? '...' : '')
+  }
+}
+
 // ========== 记忆压缩函数 ==========
 async function compressMemory(sessionId, groupId, groupName = '未知群') {
   const sessionData = sessions.get(sessionId) || loadSession(sessionId)
@@ -222,8 +274,10 @@ async function compressMemory(sessionId, groupId, groupName = '未知群') {
   const beijingTime = getBeijingTime()
   const timeStr = `${beijingTime.getUTCFullYear()}年${beijingTime.getUTCMonth() + 1}月${beijingTime.getUTCDate()}日`
   
-  // 构造摘要（简单摘要，不额外调用AI节省token）
-  const summary = `【QQ群聊记忆 - ${groupName}】\n时间：${timeStr}\n对话摘要：\n${conversationText.substring(0, 500)}${conversationText.length > 500 ? '...' : ''}`
+  // ===== 使用辅助AI做智能摘要 =====
+  const smartSummary = await callHelperAIForSummary(conversationText, 150)
+  
+  const summary = `【QQ群聊记忆 - ${groupName}】\n时间：${timeStr}\n对话摘要：\n${smartSummary}`
   
   // 存储到记忆系统
   try {
