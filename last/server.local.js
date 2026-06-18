@@ -2300,17 +2300,19 @@ function setupDailyDiaryTask() {
   
   let lastRunDate = null
   
-  // 每小时检查一次，如果是北京时间 0 点且今天没执行过，就执行
+  // ===== 【修复】每分钟检查一次，确保不会错过 0 点触发窗口
+  // 避免服务器重启时间非整点导致错过
   setInterval(() => {
     const now = new Date()
-    const todayStr = now.toISOString().split('T')[0] // YYYY-MM-DD
+    const beijingTime = new Date(now.getTime() + 8 * 60 * 60 * 1000)
+    const todayStr = beijingTime.toISOString().split('T')[0] // YYYY-MM-DD
     
     if (isBeijingMidnight() && lastRunDate !== todayStr) {
       console.log(`\n[定时任务] ===== 到达北京时间 00:00，开始整理日记 =====\n`)
       compileDailyDiary()
       lastRunDate = todayStr
     }
-  }, 60 * 60 * 1000) // 每小时检查一次
+  }, 60 * 1000) // 【修复】每分钟检查一次（原1小时太容易错过）
 }
 
 server.listen(PORT, '0.0.0.0', () => {
@@ -2332,8 +2334,6 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('  POST /api/memories/surface')
   console.log('  POST /api/memories/{id}/touch')
   
-  // 启动每日日记整理定时任务
-  if (USE_MOCK) {
-    setupDailyDiaryTask()
-  }
+  // 启动每日日记整理定时任务【已修复】：所有模式都启用，不限制MOCK
+  setupDailyDiaryTask()
 })
