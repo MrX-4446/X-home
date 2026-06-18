@@ -54,6 +54,25 @@ const CheckIcon = ({ filled }) => (
   </svg>
 )
 
+const LoaderIcon = ({ size = 14 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}>
+    <line x1="12" y1="2" x2="12" y2="6" />
+    <line x1="12" y1="18" x2="12" y2="22" />
+    <line x1="4.93" y1="4.93" x2="7.76" y2="7.76" />
+    <line x1="16.24" y1="16.24" x2="19.07" y2="19.07" />
+    <line x1="2" y1="12" x2="6" y2="12" />
+    <line x1="18" y1="12" x2="22" y2="12" />
+    <line x1="4.93" y1="19.07" x2="7.76" y2="16.24" />
+    <line x1="16.24" y1="7.76" x2="19.07" y2="4.93" />
+  </svg>
+)
+
+const StarIcon = ({ size = 14 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+  </svg>
+)
+
 function MemoryPanel({ onClose }) {
   const [memories, setMemories] = useState([])
   const [searchQuery, setSearchQuery] = useState('')
@@ -65,6 +84,12 @@ function MemoryPanel({ onClose }) {
   const [deletingId, setDeletingId] = useState(null)
   const [tagFilter, setTagFilter] = useState('')          // 【新增】标签过滤
   const [enableCrossSession, setEnableCrossSession] = useState(true)  // 【新增】跨会话开关
+  const [isMobile, setIsMobile] = useState(false) // 是否为移动端
+  const longPressTimer = useState(null) // 长按计时器
+  const [contextMenu, setContextMenu] = useState(null) // 右键菜单 { x, y, memoryId, tag }
+  const [showAddTagModal, setShowAddTagModal] = useState(false)
+  const [addingTagToMemoryId, setAddingTagToMemoryId] = useState(null)
+  const [newTagInput, setNewTagInput] = useState('')
 
   const [newMemory, setNewMemory] = useState({
     content: '',
@@ -74,11 +99,115 @@ function MemoryPanel({ onClose }) {
     is_pinned: false,
     is_resolved: false,
     source: '',
+    tags: [],
   })
 
   useEffect(() => {
     loadMemories()
   }, [statusFilter, sourceFilter, tagFilter, enableCrossSession])
+
+  // 检测是否为移动设备
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768)
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
+
+  // 点击其他地方关闭右键菜单
+  useEffect(() => {
+    const handleClickOutside = () => setContextMenu(null)
+    if (contextMenu) {
+      document.addEventListener('click', handleClickOutside)
+      return () => document.removeEventListener('click', handleClickOutside)
+    }
+  }, [contextMenu])
+
+  // 显示标签操作菜单
+  const showTagActionMenu = (x, y, memoryId, tag) => {
+    const menuWidth = 140
+    const menuHeight = 44
+    const adjustedX = Math.min(x, window.innerWidth - menuWidth - 10)
+    const adjustedY = Math.min(y, window.innerHeight - menuHeight - 10)
+    
+    setContextMenu({
+      x: adjustedX,
+      y: adjustedY,
+      memoryId,
+      tag,
+    })
+  }
+
+  // 处理标签右键
+  const handleTagContextMenu = (e, memoryId, tag) => {
+    e.preventDefault()
+    e.stopPropagation()
+    showTagActionMenu(e.clientX, e.clientY, memoryId, tag)
+  }
+
+  // 移动端长按开始
+  const handleLongPressStart = (e, memoryId, tag) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const touch = e.touches ? e.touches[0] : e
+    longPressTimer.current = setTimeout(() => {
+      showTagActionMenu(touch.clientX, touch.clientY, memoryId, tag)
+      if (navigator.vibrate) {
+        navigator.vibrate(50)
+      }
+    }, 500)
+  }
+
+  // 移动端长按结束
+  const handleLongPressEnd = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current)
+      longPressTimer.current = null
+    }
+  }
+
+  // 删除标签
+  const deleteTag = async () => {
+    if (!contextMenu) return
+    const { memoryId, tag } = contextMenu
+    try {
+      const memory = memories.find(m => m.id === memoryId)
+      if (memory) {
+        const newTags = (memory.tags || []).filter(t => t !== tag)
+        await api.patch(`/api/memories/${memoryId}`, { tags: newTags })
+        loadMemories()
+      }
+    } catch (error) {
+      console.error('删除标签失败:', error)
+    }
+    setContextMenu(null)
+  }
+
+  // 打开添加标签对话框
+  const openAddTagModal = (memoryId) => {
+    setAddingTagToMemoryId(memoryId)
+    setNewTagInput('')
+    setShowAddTagModal(true)
+  }
+
+  // 添加标签
+  const addTagToMemory = async () => {
+    if (!newTagInput.trim() || !addingTagToMemoryId) return
+    const tag = newTagInput.trim()
+    try {
+      const memory = memories.find(m => m.id === addingTagToMemoryId)
+      if (memory) {
+        const newTags = [...new Set([...(memory.tags || []), tag])]
+        await api.patch(`/api/memories/${addingTagToMemoryId}`, { tags: newTags })
+        loadMemories()
+      }
+    } catch (error) {
+      console.error('添加标签失败:', error)
+    }
+    setShowAddTagModal(false)
+    setAddingTagToMemoryId(null)
+    setNewTagInput('')
+  }
 
   const loadMemories = async () => {
     setIsLoading(true)
@@ -123,6 +252,7 @@ function MemoryPanel({ onClose }) {
         is_pinned: newMemory.is_pinned,
         is_resolved: newMemory.is_resolved,
         source: newMemory.source.trim() || null,
+        tags: newMemory.tags,
       })
 
       setShowAddPanel(false)
@@ -151,6 +281,7 @@ function MemoryPanel({ onClose }) {
       is_pinned: memory.is_pinned || false,
       is_resolved: memory.is_resolved || false,
       source: memory.source || '',
+      tags: memory.tags || [],
     })
     setShowAddPanel(true)
   }
@@ -167,6 +298,7 @@ function MemoryPanel({ onClose }) {
         is_pinned: newMemory.is_pinned,
         is_resolved: newMemory.is_resolved,
         source: newMemory.source.trim() || null,
+        tags: newMemory.tags,
       })
 
       setShowAddPanel(false)
@@ -568,18 +700,50 @@ function MemoryPanel({ onClose }) {
                     </div>
                   </div>
                   <p className="memory-content">{memory.content}</p>
-                  {memory.tags && memory.tags.length > 0 && (
-                    <div className="memory-tags">
-                      {memory.tags.map(tag => (
-                        <span 
-                          key={tag} 
-                          className="memory-tag"
-                          onClick={() => setTagFilter(tagFilter === tag ? '' : tag)}
-                          style={{ cursor: 'pointer' }}
-                        >#{tag}</span>
-                      ))}
-                    </div>
-                  )}
+                  <div className="memory-tags" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+                    {memory.tags && memory.tags.length > 0 && memory.tags.map(tag => (
+                      <span 
+                        key={tag} 
+                        className="memory-tag"
+                        onClick={() => setTagFilter(tagFilter === tag ? '' : tag)}
+                        onContextMenu={(e) => handleTagContextMenu(e, memory.id, tag)}
+                        onTouchStart={(e) => handleLongPressStart(e, memory.id, tag)}
+                        onTouchEnd={handleLongPressEnd}
+                        onTouchMove={handleLongPressEnd}
+                        onMouseDown={(e) => handleLongPressStart(e, memory.id, tag)}
+                        onMouseUp={handleLongPressEnd}
+                        onMouseLeave={handleLongPressEnd}
+                        style={{ 
+                          cursor: 'pointer',
+                          padding: isMobile ? '6px 12px' : '4px 10px',
+                          borderRadius: isMobile ? '16px' : '14px',
+                          fontSize: isMobile ? '13px' : '12px',
+                          WebkitTapHighlightColor: 'transparent',
+                          touchAction: 'none',
+                        }}
+                        title={isMobile ? "长按删除标签" : "右键删除标签"}
+                      >#{tag}</span>
+                    ))}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openAddTagModal(memory.id); }}
+                      style={{
+                        padding: isMobile ? '6px 12px' : '4px 10px',
+                        background: 'rgba(124, 58, 237, 0.1)',
+                        color: '#7C3AED',
+                        borderRadius: isMobile ? '16px' : '14px',
+                        fontSize: isMobile ? '13px' : '12px',
+                        border: 'none',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        transition: 'all 0.2s ease',
+                        WebkitTapHighlightColor: 'transparent',
+                      }}
+                    >
+                      <PlusIcon /> 添加
+                    </button>
+                  </div>
                   <div className="memory-footer">
                     <div className="memory-info">
                       {memory.source && <span className="memory-source">来源: {memory.source}</span>}
@@ -631,6 +795,137 @@ function MemoryPanel({ onClose }) {
             <div className="delete-confirm-actions">
               <button className="cancel-btn" onClick={cancelDelete}>取消</button>
               <button className="delete-btn" onClick={confirmDelete}>删除</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 右键菜单 - 删除标签 */}
+      {contextMenu && (
+        <div
+          style={{
+            position: 'fixed',
+            top: isMobile ? contextMenu.y - 60 : contextMenu.y,
+            left: contextMenu.x,
+            background: 'white',
+            borderRadius: isMobile ? '16px' : '12px',
+            boxShadow: isMobile ? '0 8px 30px rgba(0, 0, 0, 0.2)' : '0 4px 20px rgba(0, 0, 0, 0.15)',
+            padding: isMobile ? '12px 0' : '8px 0',
+            zIndex: 99999999,
+            minWidth: isMobile ? '160px' : '140px',
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div
+            onClick={deleteTag}
+            style={{
+              padding: isMobile ? '14px 20px' : '10px 16px',
+              cursor: 'pointer',
+              color: '#EF4444',
+              fontSize: isMobile ? '16px' : '14px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              transition: 'background 0.2s ease',
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)'}
+            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+          >
+            <TrashIcon size={isMobile ? 18 : 14} /> 删除标签
+          </div>
+        </div>
+      )}
+
+      {/* 添加标签弹窗 */}
+      {showAddTagModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: isMobile ? 'flex-end' : 'center',
+          justifyContent: 'center',
+          zIndex: 9999999,
+          padding: isMobile ? '0' : '20px',
+        }} onClick={() => setShowAddTagModal(false)}>
+          <div style={{
+            background: 'white',
+            borderRadius: isMobile ? '24px 24px 0 0' : '20px',
+            padding: isMobile ? '30px 24px 40px' : '24px',
+            width: '100%',
+            maxWidth: isMobile ? '100%' : '400px',
+            maxHeight: isMobile ? '70vh' : 'none',
+            overflowY: 'auto',
+          }} onClick={(e) => e.stopPropagation()}>
+            {isMobile && (
+              <div style={{
+                width: '40px',
+                height: '4px',
+                background: 'rgba(138, 133, 128, 0.3)',
+                borderRadius: '2px',
+                margin: '-10px auto 20px auto',
+              }} />
+            )}
+            <h3 style={{ marginBottom: '20px', color: '#1f2937', display: 'flex', alignItems: 'center', gap: '8px', fontSize: isMobile ? '20px' : '18px' }}>
+              <StarIcon size={isMobile ? 24 : 20} /> 添加新标签
+            </h3>
+            
+            <input
+              type="text"
+              placeholder="输入标签名称..."
+              value={newTagInput}
+              onChange={(e) => setNewTagInput(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && addTagToMemory()}
+              style={{
+                width: '100%',
+                padding: isMobile ? '16px 20px' : '12px 16px',
+                border: '1px solid rgba(138, 133, 128, 0.2)',
+                borderRadius: isMobile ? '16px' : '12px',
+                fontSize: isMobile ? '16px' : '14px',
+                fontFamily: 'inherit',
+                marginBottom: '20px',
+                outline: 'none',
+              }}
+              autoFocus
+            />
+
+            <div style={{ display: 'flex', gap: isMobile ? '12px' : '12px', flexDirection: isMobile ? 'column' : 'row' }}>
+              <button 
+                style={{
+                  flex: 1,
+                  padding: isMobile ? '16px' : '12px',
+                  border: 'none',
+                  borderRadius: isMobile ? '16px' : '12px',
+                  fontSize: isMobile ? '16px' : '14px',
+                  cursor: 'pointer',
+                  background: 'rgba(138, 133, 128, 0.1)',
+                  color: '#8A8580',
+                  fontWeight: '500',
+                }}
+                onClick={() => setShowAddTagModal(false)}
+              >
+                取消
+              </button>
+              <button 
+                style={{
+                  flex: 1,
+                  padding: isMobile ? '16px' : '12px',
+                  border: 'none',
+                  borderRadius: isMobile ? '16px' : '12px',
+                  fontSize: isMobile ? '16px' : '14px',
+                  cursor: 'pointer',
+                  background: 'linear-gradient(135deg, #7C3AED 0%, #5B21B6 100%)',
+                  color: 'white',
+                  fontWeight: '500',
+                }}
+                onClick={addTagToMemory}
+                disabled={!newTagInput.trim()}
+              >
+                添加
+              </button>
             </div>
           </div>
         </div>

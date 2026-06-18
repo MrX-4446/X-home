@@ -7,6 +7,7 @@ import CustomSelect from './components/CustomSelect'
 import ToolConfigPanel from './components/ToolConfigPanel'
 import MemoryPanel from './components/MemoryPanel'
 import AppCheckPanel from './components/AppCheckPanel'
+import ReadingPartner from './components/ReadingPartner'
 import errorMonitor from './lib/errorMonitor'
 // 所有数据访问与 AI 调用统一通过后端 API（D:\X\last 部署的服务）
 import {
@@ -52,6 +53,7 @@ function App() {
   const [toolConfigOpen, setToolConfigOpen] = useState(false)
   const [memoryOpen, setMemoryOpen] = useState(false)
   const [appCheckOpen, setAppCheckOpen] = useState(false)
+  const [readingOpen, setReadingOpen] = useState(false) // 共读伴侣界面
   const [toolList, setToolList] = useState([
     { id: 'tool-1', name: '网页搜索', description: '实时搜索互联网信息', iconKey: '搜索', enabled: true, category: '搜索', type: 'tool' },
     { id: 'tool-2', name: '计算器', description: '执行数学计算', iconKey: '计算器', enabled: true, category: '工具', type: 'tool' },
@@ -313,6 +315,7 @@ function App() {
           onOpenToolConfig={() => setToolConfigOpen(true)}
           onOpenMemory={() => setMemoryOpen(true)}
           onOpenAppCheck={() => setAppCheckOpen(true)}
+          onOpenReading={() => setReadingOpen(true)}
         />
       ) : (
         <>
@@ -396,6 +399,27 @@ function App() {
       {appCheckOpen && (
         <AppCheckPanel 
           onClose={() => setAppCheckOpen(false)}
+        />
+      )}
+
+      {/* 共读伴侣界面 - 全屏 */}
+      {readingOpen && (
+        <ReadingPartner
+          onClose={() => setReadingOpen(false)}
+          onSendMessage={(text) => {
+            // 直接在当前聊天中发送共读讨论内容
+            setInputValue(text)
+            setCurrentPage('chat')
+            // 延迟一下，让页面切换完成后自动发送
+            setTimeout(() => {
+              const inputElement = document.querySelector('textarea')
+              if (inputElement) {
+                // 触发发送（模拟回车）
+                const event = new KeyboardEvent('keydown', { key: 'Enter' })
+                inputElement.dispatchEvent(event)
+              }
+            }, 100)
+          }}
         />
       )}
     </div>
@@ -625,6 +649,7 @@ function ChatArea({
           onGoHome={onGoHome} 
           chatName={settings.chat_name || chat?.chatName || '智语助手'} 
           chatAvatar={chat?.chatAvatar || '智'}
+          chatTitle={chat?.title || ''}
           onOpenSettings={onOpenSettings}
         />
       <div className="messages-area">
@@ -660,7 +685,12 @@ function ChatArea({
   )
 }
 
-function ChatHeader({ onOpenSidebar, onGoHome, chatName, chatAvatar, onOpenSettings }) {
+function ChatHeader({ onOpenSidebar, onGoHome, chatName, chatAvatar, chatTitle, onOpenSettings }) {
+  // 动态标题格式：和 X 聊聊 第一次见面
+  // chatName = 聊天对象（如"智语助手"）
+  // chatTitle = 会话标题（如"第一次见面"）
+  const displayTitle = chatTitle ? `和 ${chatName} 聊聊 ${chatTitle}` : `和 ${chatName} 聊天`
+
   return (
     <div className="chat-header">
       <div className="header-left">
@@ -668,7 +698,7 @@ function ChatHeader({ onOpenSidebar, onGoHome, chatName, chatAvatar, onOpenSetti
         <button className="home-btn" onClick={onGoHome}>首页</button>
       </div>
       <div className="header-center">
-        <div className="chat-title">{chatName}</div>
+        <div className="chat-title">{displayTitle}</div>
         <div className="status">
           <span className="status-dot"></span>
           在线
