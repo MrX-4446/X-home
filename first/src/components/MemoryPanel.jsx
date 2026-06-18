@@ -63,6 +63,8 @@ function MemoryPanel({ onClose }) {
   const [sourceFilter, setSourceFilter] = useState('all')
   const [isLoading, setIsLoading] = useState(true)
   const [deletingId, setDeletingId] = useState(null)
+  const [tagFilter, setTagFilter] = useState('')          // 【新增】标签过滤
+  const [enableCrossSession, setEnableCrossSession] = useState(true)  // 【新增】跨会话开关
 
   const [newMemory, setNewMemory] = useState({
     content: '',
@@ -76,7 +78,7 @@ function MemoryPanel({ onClose }) {
 
   useEffect(() => {
     loadMemories()
-  }, [statusFilter, sourceFilter])
+  }, [statusFilter, sourceFilter, tagFilter, enableCrossSession])
 
   const loadMemories = async () => {
     setIsLoading(true)
@@ -85,6 +87,8 @@ function MemoryPanel({ onClose }) {
       if (statusFilter === 'active') params.set('is_active', 'true')
       if (statusFilter === 'archived') params.set('is_active', 'false')
       if (sourceFilter !== 'all') params.set('source', sourceFilter)
+      if (tagFilter) params.set('tag', tagFilter)                     // 标签过滤
+      if (enableCrossSession) params.set('cross', 'true')             // 跨会话开关
 
       const response = await api.get(`/api/memories?${params.toString()}`)
       setMemories(response.data || [])
@@ -275,6 +279,7 @@ function MemoryPanel({ onClose }) {
   }
 
   const allSources = [...new Set(memories.map(m => m.source).filter(Boolean))]
+  const allTags = [...new Set(memories.flatMap(m => m.tags || []).filter(Boolean))]
 
   return (
     <>
@@ -286,7 +291,9 @@ function MemoryPanel({ onClose }) {
           </button>
           <h1 className="panel-title">记忆系统</h1>
           <div className="tool-header-actions">
-            <span className="panel-subtitle">共 {memories.length} 条记忆</span>
+            <span className="panel-subtitle">共 {memories.length} 条记忆
+              {enableCrossSession && <span style={{ color: '#10b981', marginLeft: 8 }}>🔗 跨会话已启用</span>}
+            </span>
             <button className="add-tool-btn" onClick={() => {
               setEditingId(null)
               setNewMemory({
@@ -479,7 +486,32 @@ function MemoryPanel({ onClose }) {
                 </div>
               </div>
             )}
+            <div className="filter-group">
+              <span className="filter-label">跨会话：</span>
+              <div className="filter-options">
+                <button 
+                  className={`filter-option ${enableCrossSession ? 'active' : ''}`}
+                  onClick={() => setEnableCrossSession(!enableCrossSession)}
+                >{enableCrossSession ? '✅ 已开启' : '❌ 已关闭'}</button>
+              </div>
+            </div>
           </div>
+          {allTags.length > 0 && (
+            <div className="tags-filter-bar">
+              <span className="filter-label">标签：</span>
+              <button 
+                className={`tag-chip ${tagFilter === '' ? 'active' : ''}`}
+                onClick={() => setTagFilter('')}
+              >全部</button>
+              {allTags.map(tag => (
+                <button
+                  key={tag}
+                  className={`tag-chip ${tagFilter === tag ? 'active' : ''}`}
+                  onClick={() => setTagFilter(tagFilter === tag ? '' : tag)}
+                ><TagIcon /> {tag}</button>
+              ))}
+            </div>
+          )}
 
           <div className="memory-list">
             {isLoading ? (
@@ -536,6 +568,18 @@ function MemoryPanel({ onClose }) {
                     </div>
                   </div>
                   <p className="memory-content">{memory.content}</p>
+                  {memory.tags && memory.tags.length > 0 && (
+                    <div className="memory-tags">
+                      {memory.tags.map(tag => (
+                        <span 
+                          key={tag} 
+                          className="memory-tag"
+                          onClick={() => setTagFilter(tagFilter === tag ? '' : tag)}
+                          style={{ cursor: 'pointer' }}
+                        >#{tag}</span>
+                      ))}
+                    </div>
+                  )}
                   <div className="memory-footer">
                     <div className="memory-info">
                       {memory.source && <span className="memory-source">来源: {memory.source}</span>}

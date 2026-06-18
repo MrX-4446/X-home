@@ -4026,6 +4026,66 @@ select.ai-form-input option:first-child {
   background-color: rgba(90, 122, 93, 0.1);
 }
 
+/* ========== 记忆标签样式 ========== */
+.tags-filter-bar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+  padding: 12px 16px;
+  background: var(--background-card);
+  border-radius: var(--radius-md);
+  align-items: center;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-radius: 9999px;
+  font-size: 12px;
+  background: white;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tag-chip:hover {
+  border-color: var(--primary-warm-gray);
+  color: var(--text-primary);
+}
+
+.tag-chip.active {
+  background-color: var(--primary-warm-gray);
+  color: white;
+  border-color: var(--primary-warm-gray);
+}
+
+.memory-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.memory-tag {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 11px;
+  background: linear-gradient(135deg, rgba(122, 138, 153, 0.15), rgba(122, 138, 153, 0.08));
+  color: var(--primary-warm-gray-blue-dark);
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.memory-tag:hover {
+  background: linear-gradient(135deg, rgba(122, 138, 153, 0.25), rgba(122, 138, 153, 0.15));
+  transform: translateY(-1px);
+}
+
 .tool-header-actions {
   display: flex;
   align-items: center;
@@ -5177,4 +5237,65 @@ html {
     min-height: 44px;
     min-width: 44px;
   }
+}
+
+
+/* ========== �����ǩ��ʽ ========== */
+.tags-filter-bar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+  padding: 12px 16px;
+  background: var(--background-card);
+  border-radius: var(--radius-md);
+  align-items: center;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  background: white;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tag-chip:hover {
+  border-color: var(--primary-warm-gray);
+  color: var(--text-primary);
+}
+
+.tag-chip.active {
+  background: var(--primary-warm-gray);
+  color: white;
+  border-color: var(--primary-warm-gray);
+}
+
+.memory-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.memory-tag {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  background: linear-gradient(135deg, rgba(122,138,153,0.15), rgba(122,138,153,0.08);
+  color: var(--primary-warm-gray-blue-dark);
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.memory-tag:hover {
+  background: linear-gradient(135deg, rgba(122,138,153,0.25)), rgba(122,138,153,0.15);
+  transform: translateY(-1px);
 }

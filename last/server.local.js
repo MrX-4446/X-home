@@ -443,6 +443,182 @@ ${content}
   }
 }
 
+// =============================================================
+// 🔗 记忆高级功能 - 共享算法库
+// 用途：QQ端、Web端共用同一套记忆算法
+// 包含：语义去重、关键词提取、跨会话关联、智能遗忘
+// =============================================================
+
+// ---------- 1. 分词与相似度计算 ----------
+function tokenize(text) {
+  const cleanText = String(text || '').toLowerCase().replace(/[^\w\u4e00-\u9fa5]/g, ' ')
+  const tokens = []
+  for (let i = 0; i < cleanText.length; i++) {
+    if (cleanText[i] !== ' ') {
+      if (/[\u4e00-\u9fa5]/.test(cleanText[i])) {
+        tokens.push(cleanText[i])
+      } else {
+        let word = ''
+        while (i < cleanText.length && /[a-z0-9]/.test(cleanText[i])) {
+          word += cleanText[i]
+          i++
+        }
+        if (word) tokens.push(word)
+      }
+    }
+  }
+  return tokens
+}
+
+function getTermFreq(text) {
+  const tokens = tokenize(text)
+  const tf = {}
+  tokens.forEach(t => tf[t] = (tf[t] || 0) + 1)
+  return tf
+}
+
+function cosineSimilarity(text1, text2) {
+  const tf1 = getTermFreq(text1)
+  const tf2 = getTermFreq(text2)
+  const allTerms = new Set([...Object.keys(tf1), ...Object.keys(tf2)])
+  let dotProduct = 0, mag1 = 0, mag2 = 0
+  allTerms.forEach(term => {
+    const v1 = tf1[term] || 0
+    const v2 = tf2[term] || 0
+    dotProduct += v1 * v2
+    mag1 += v1 * v1
+    mag2 += v2 * v2
+  })
+  mag1 = Math.sqrt(mag1)
+  mag2 = Math.sqrt(mag2)
+  return (mag1 === 0 || mag2 === 0) ? 0 : dotProduct / (mag1 * mag2)
+}
+
+// ---------- 2. 语义去重检查 ----------
+async function findSimilarMemory(newContent, existingMemories, threshold = 0.7) {
+  for (const mem of existingMemories) {
+    const similarity = cosineSimilarity(newContent, mem.content)
+    if (similarity >= threshold) {
+      console.log(`[记忆去重] 相似度${Math.round(similarity*100)}%: ${mem.content.substring(0, 30)}...`)
+      return mem
+    }
+  }
+  return null
+}
+
+// ---------- 3. 智能遗忘算法 ----------
+async function applyMemoryForgettingCurve(memories) {
+  const now = new Date()
+  const FORGETTING_RATE = 0.05
+  const MIN_IMPORTANCE = 2
+  let updatedCount = 0
+
+  for (const mem of memories) {
+    if (mem.is_pinned) continue
+
+    const lastActive = new Date(mem.last_activated_at || mem.created_at || now)
+    const daysSinceActive = (now - lastActive) / (1000 * 60 * 60 * 24)
+
+    if (daysSinceActive > 7 && mem.importance > MIN_IMPORTANCE) {
+      const newImportance = Math.max(MIN_IMPORTANCE, Math.round(mem.importance * (1 - FORGETTING_RATE)))
+      if (newImportance < mem.importance) {
+        mem.importance = newImportance
+        if (!USE_MOCK) {
+          await supabaseUpdateMemory(mem.id, { importance: newImportance })
+        } else {
+          // MOCK模式下更新文件
+          const allMemories = readStorage('memories') || []
+          const idx = allMemories.findIndex(m => m.id === mem.id)
+          if (idx !== -1) {
+            allMemories[idx].importance = newImportance
+            writeStorage('memories', allMemories)
+          }
+        }
+        console.log(`[智能遗忘] ${mem.id.substring(0, 12)} 重要性降级 → ${newImportance}`)
+        updatedCount++
+      }
+    }
+  }
+  return updatedCount
+}
+
+// ---------- 4. 关键词提取（调用AI）----------
+async function extractMemoryKeywords(content) {
+  try {
+    const prompt = `从以下文本中提取3-8个关键实体词（人物、地点、事件、物品等），用英文逗号分隔，不要任何解释：\n\n${content}`
+    const result = await callAIProvider(null, [{ role: 'user', content: prompt }])
+    const rawKeywords = (result.reply || '').trim()
+    const keywords = rawKeywords
+      .split(/[,，、\n]/)
+      .map(k => k.trim().replace(/['""'']/g, ''))
+      .filter(k => k.length > 1 && k.length < 20)
+      .slice(0, 8)
+    console.log(`[关键词提取] ${keywords.join(', ')}`)
+    return keywords
+  } catch (err) {
+    console.error('[关键词提取] 失败:', err.message)
+    return []
+  }
+}
+
+// ---------- 5. 跨会话关联 - 用户身份映射表 ----------
+// 格式: { web_chat_id: ["qq_group_123", "qq_private_456"], ... }
+// 实际项目中建议存在数据库的 user_identity_map 表
+const USER_IDENTITY_MAP = {
+  // 在这里配置你的映射关系
+  // "web_session_轩": ["qq_group_123456", "qq_private_7890123"]
+}
+
+function getRelatedChatIds(currentChatId) {
+  const relatedIds = new Set([currentChatId])
+  for (const [key, ids] of Object.entries(USER_IDENTITY_MAP)) {
+    if (ids.includes(currentChatId) || currentChatId.includes(key) || key.includes(currentChatId)) {
+      ids.forEach(id => relatedIds.add(id))
+    }
+  }
+  if (relatedIds.size > 1) {
+    console.log(`[跨会话关联] 找到 ${relatedIds.size} 个关联会话`)
+  }
+  return Array.from(relatedIds)
+}
+
+// ---------- 6. 增强版记忆检索 ----------
+async function surfaceMemoriesEnhanced(chatId, limit = 10) {
+  // 获取所有关联会话的记忆
+  const relatedChatIds = getRelatedChatIds(chatId)
+  let allMemories = []
+
+  for (const cid of relatedChatIds) {
+    const mems = await supabaseGetMemories(cid, { is_active: true })
+    allMemories.push(...mems)
+  }
+
+  // 打分排序（原算法保持）
+  const decayRate = parseFloat(await supabaseGetSetting('memory_decay_rate') || '0.01')
+  const now = new Date()
+
+  const scored = allMemories.map(mem => {
+    const created = new Date(mem.created_at)
+    const hoursSinceCreated = (now - created) / (1000 * 60 * 60)
+    const decay = Math.exp(-decayRate * hoursSinceCreated)
+    const emotionIntensity = Math.sqrt(mem.valence ** 2 + mem.arousal ** 2)
+    const resolveBonus = mem.is_resolved ? 0.3 : 1.0
+
+    const score = (mem.importance * 0.4 +
+                   mem.activation_count * 0.2 +
+                   emotionIntensity * 0.2 +
+                   decay * 0.2) * resolveBonus
+
+    return { ...mem, score, fromCrossSession: mem.chat_id !== chatId }
+  })
+
+  const sorted = scored.sort((a, b) => b.score - a.score)
+  const pinned = sorted.filter(m => m.is_pinned)
+  const unpinned = sorted.filter(m => !m.is_pinned).slice(0, limit - pinned.length)
+
+  return [...pinned, ...unpinned]
+}
+
 // ========== 主动浮现机制 ==========
 async function surfaceMemories(chatId, limit = 10) {
   const memories = await supabaseGetMemories(chatId, { is_active: true })
@@ -1540,6 +1716,8 @@ ${messagesText}
       const isPinned = url.searchParams.get('is_pinned')
       const isResolved = url.searchParams.get('is_resolved')
       const source = url.searchParams.get('source')
+      const tag = url.searchParams.get('tag')          // 【新增】按标签过滤
+      const crossSession = url.searchParams.get('cross') === 'true'  // 【新增】跨会话开关
 
       const filters = {}
       if (isActive !== null) filters.is_active = isActive === 'true'
@@ -1549,11 +1727,27 @@ ${messagesText}
 
       if (USE_MOCK) {
         let mockMemories = readStorage('memories') || []
-        if (chatId) mockMemories = mockMemories.filter(m => m.chat_id === chatId)
+
+        // ---------- 【跨会话检索】----------
+        if (crossSession && chatId) {
+          const relatedChatIds = getRelatedChatIds(chatId)
+          mockMemories = mockMemories.filter(m => relatedChatIds.includes(m.chat_id))
+        } else if (chatId) {
+          mockMemories = mockMemories.filter(m => m.chat_id === chatId)
+        }
+
         if (isActive !== null) mockMemories = mockMemories.filter(m => m.is_active === (isActive === 'true'))
         if (isPinned !== null) mockMemories = mockMemories.filter(m => m.is_pinned === (isPinned === 'true'))
         if (isResolved !== null) mockMemories = mockMemories.filter(m => m.is_resolved === (isResolved === 'true'))
         if (source) mockMemories = mockMemories.filter(m => m.source === source)
+
+        // ---------- 【标签过滤】----------
+        if (tag) {
+          mockMemories = mockMemories.filter(m =>
+            m.tags && m.tags.some(t => t.toLowerCase().includes(tag.toLowerCase()))
+          )
+        }
+
         return sendJson(res, 200, { data: mockMemories })
       }
       const memories = await supabaseGetMemories(chatId, filters)
@@ -1572,6 +1766,13 @@ ${messagesText}
         emotion = await analyzeEmotion(body.content)
       }
 
+      // ---------- 【自动打标签】----------
+      let tags = body.tags || []
+      if (!body.skipAutoTag && body.autoTag !== false) {
+        const autoTags = await extractMemoryKeywords(body.content)
+        tags = [...new Set([...tags, ...autoTags])]
+      }
+
       const memoryData = {
         chat_id: body.chat_id || null,
         content: body.content,
@@ -1582,6 +1783,23 @@ ${messagesText}
         is_resolved: body.is_resolved || false,
         is_active: body.is_active !== undefined ? body.is_active : true,
         source: body.source || null,
+        tags: tags,  // 新增：带API支持标签字段
+      }
+
+      // ---------- 【语义去重检查】----------
+      if (!body.skipDuplicateCheck) {
+        const existingMemories = USE_MOCK
+          ? (readStorage('memories') || [])
+          : await supabaseGetMemories(body.chat_id || null, { is_active: true })
+
+        const duplicate = await findSimilarMemory(body.content, existingMemories)
+        if (duplicate) {
+          return sendJson(res, 200, {
+            data: duplicate,
+            isDuplicate: true,
+            message: '发现相似记忆，已跳过重复保存'
+          })
+        }
       }
 
       if (USE_MOCK) {
