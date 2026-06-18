@@ -583,6 +583,14 @@ function MemoryPanel({ onClose }) {
                   <div className="memory-footer">
                     <div className="memory-info">
                       {memory.source && <span className="memory-source">来源: {memory.source}</span>}
+                      {memory.chat_id && (
+                        <span 
+                          className="memory-chatid" 
+                          onClick={() => navigator.clipboard.writeText(memory.chat_id)}
+                          style={{ cursor: 'pointer', color: '#7C3AED', fontFamily: 'monospace' }}
+                          title="点击复制chat_id"
+                        >会话: {memory.chat_id} 📋</span>
+                      )}
                       <span className="memory-hits">命中 {memory.activation_count || 0} 次</span>
                       {memory.created_at && <span className="memory-date">{new Date(memory.created_at).toLocaleDateString()}</span>}
                     </div>
