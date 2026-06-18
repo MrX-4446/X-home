@@ -31,6 +31,19 @@ const CONFIG = {
   // 触发AI摘要的阈值，短消息用规则压缩省token
   AI_SUMMARY_THRESHOLD: 300,  // >300字才调用AI摘要
   
+  // ========== AI 模型参数（与Web端配置保持一致）==========
+  // 温度: 0=更确定性，1=更随机放飞（恋爱推荐0.7-0.85）
+  AI_TEMPERATURE: parseFloat(process.env.AI_TEMPERATURE || 0.75),
+  
+  // Top-P: 核采样阈值，越小越保守，越大约束越少（恋爱推荐0.9）
+  AI_TOP_P: parseFloat(process.env.AI_TOP_P || 0.9),
+  
+  // 最大回复长度（一般1000-2000字够用，省token）
+  AI_MAX_TOKENS: parseInt(process.env.AI_MAX_TOKENS || 1500),
+  
+  // 记忆压缩阈值: 每N轮对话自动压缩进记忆系统
+  MEMORY_COMPRESS_THRESHOLD: 20,
+  
   // 允许的群号（留空表示允许所有群）
   ALLOWED_GROUPS: (process.env.ALLOWED_GROUPS || '').split(',').filter(Boolean).map(Number),
   
@@ -575,6 +588,10 @@ async function callAI(sessionId, userMessage, userName, userId, groupId, groupNa
       body: JSON.stringify({
         chatId: sessionId,
         messages: [...history, { role: 'user', content: enhancedMessage }],
+        // ===== AI 模型参数（和Web端保持一致）
+        temperature: CONFIG.AI_TEMPERATURE,
+        top_p: CONFIG.AI_TOP_P,
+        max_tokens: CONFIG.AI_MAX_TOKENS,
       }),
     })
     
