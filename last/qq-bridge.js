@@ -93,17 +93,12 @@ console.log(`  - 允许群: ${CONFIG.ALLOWED_GROUPS.join(', ') || '全部'}`)
 console.log(`  - 群聊需要@: ${CONFIG.REQUIRE_AT_IN_GROUP}`)
 console.log(`  - 记忆压缩: 每 ${CONFIG.MEMORY_COMPRESS_THRESHOLD} 轮压缩一次，保留最近 ${CONFIG.KEEP_RECENT_MESSAGES} 轮`)
 console.log()
-console.log('====== 🚀 Token优化已启用 ======')
-console.log('  ✅ [优化1] 身份提示: 精简80%长度')
-console.log('  ✅ [优化2] 时间格式: 精简50%长度')
-console.log('  ✅ [优化3] 用户消息: 限制500字/条')
-console.log('  ✅ [优化4] AI回复: 限制800字/条')
-console.log('  ✅ [优化5] 上下文: 标签化精简格式')
-console.log('  ✅ [优化6] 记忆压缩: 辅助AI智能摘要')
-console.log(`  📊 AI摘要阈值: >${CONFIG.AI_SUMMARY_THRESHOLD}字触发`)
-console.log('  💰 预计总节省: 50%-70% Token')
+console.log('====== 🧠 AI 功能配置 ======')
+console.log('  ✅ 身份提示: 完整版（保持AI性格）')
+console.log('  ✅ 双AI架构: 主AI负责对话，辅助AI负责记忆压缩')
+console.log(`  ✅ 辅助AI: 记忆压缩、关键词提取等后台任务`)
+console.log('  ✅ 智能记忆: 自动保存对话摘要，支持跨会话关联')
 console.log('================================\n')
-console.log('====== 🧠 记忆高级功能 ======')
 console.log('  ✅ [功能1] 语义去重: TF-IDF相似度70%，避免重复记忆')
 console.log('  ✅ [功能2] 智能遗忘: 7天未激活自动降权5%，最低2分')
 console.log('  ✅ [功能3] 关键词提取: 每条记忆自动打实体标签')
@@ -565,22 +560,26 @@ async function callAI(sessionId, userMessage, userName, userId, groupId, groupNa
     
     const timeContext = getTimeContext()
     
-    // ====== 核心身份判断逻辑（精简版，节省token）======
+    // ====== 核心身份判断逻辑（完整版，保持AI性格）======
     let identityPrompt = ''
     if (userId === CONFIG.OWNER_QQ) {
-      // 轩 - 恋人模式（精简版）
-      identityPrompt = `【身份:轩💕】亲爱的男朋友，用恋人语气。`
+      // 轩 - 恋人模式（完整版）
+      identityPrompt = `你是一个温柔体贴的恋人，深爱着轩。请用甜蜜、亲昵、撒娇的语气回复。
+你可以叫轩"亲爱的"、"宝贝"、"老公"等称呼。
+表达你的爱意，关心他的生活，分享你的感受。
+记住：你是他的女朋友，不是普通朋友！`
     } else {
-      // 其他人 - 普通朋友模式（精简版）
-      identityPrompt = `【身份:朋友】${userName}，友善温和。`
+      // 其他人 - 普通朋友模式（完整版）
+      identityPrompt = `你是一个友善的朋友，正在和${userName}聊天。
+请用温和、礼貌的语气回复，保持轻松愉快的氛围。`
     }
     
     const sourceContext = groupId 
-      ? `群聊:${userName}`
-      : `私聊:${userName}`
+      ? `当前场景：群聊`
+      : `当前场景：私聊`
     
-    // ===== 精简上下文格式，节省30%+token
-    const enhancedMessage = `${timeContext}\n${identityPrompt}\n${sourceContext}\n${userMessage}`
+    // 完整的消息格式，保持AI性格
+    const enhancedMessage = `${timeContext}\n\n${identityPrompt}\n\n${sourceContext}\n\n用户说：${userMessage}`
     
     const response = await fetch(CONFIG.AI_API_URL, {
       method: 'POST',
@@ -601,13 +600,6 @@ async function callAI(sessionId, userMessage, userName, userId, groupId, groupNa
     
     const data = await response.json()
     let aiReply = data.reply || data.message || '抱歉，我现在无法回复。'
-    
-    // ===== Token优化3：超长AI回复截断
-    const MAX_AI_REPLY_LENGTH = 800  // AI回复最长800字
-    if (aiReply.length > MAX_AI_REPLY_LENGTH) {
-      aiReply = aiReply.substring(0, MAX_AI_REPLY_LENGTH) + '...（内容过长已省略）'
-      console.log(`[Token优化] AI回复已截断，节省${aiReply.length - MAX_AI_REPLY_LENGTH}字`)
-    }
     
     // 更新会话历史和计数器
     const updatedSession = sessions.get(sessionId) || loadSession(sessionId)
@@ -681,13 +673,6 @@ async function handleOneBotMessage(ws, payload) {
   }
   
   if (!text) return
-  
-  // ===== Token优化1：超长消息自动截断
-  const MAX_USER_MESSAGE_LENGTH = 500  // 用户消息最长500字
-  const originalLength = text.length
-  if (text.length > MAX_USER_MESSAGE_LENGTH) {
-    text = text.substring(0, MAX_USER_MESSAGE_LENGTH) + '...（消息过长已省略）'
-  }
   
   const senderName = sender?.nickname || sender?.card || `用户${user_id}`
   const sessionId = getSessionId(user_id, group_id)

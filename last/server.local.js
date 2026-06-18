@@ -134,7 +134,34 @@ async function testAIProvider(provider) {
 
 // Mock 数据
 const mockChats = readStorage('chats') || []
-const mockAIProviders = readStorage('ai-providers') || []
+
+// 默认AI提供商配置（如果本地存储为空则使用）
+const defaultAIProviders = [
+  {
+    id: 1,
+    name: '火山方舟 DeepSeek',
+    provider: 'volcengine',
+    model: process.env.ARK_MODEL || 'ep-20250000000000-xxxxx',
+    endpoint: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
+    enabled: true,
+    created_at: new Date().toISOString(),
+    _apiKeyPlain: process.env.ARK_API_KEY || '',
+  },
+  {
+    id: 2,
+    name: '火山方舟 辅助AI（记忆压缩专用）',
+    provider: 'volcengine',
+    model: process.env.ARK_MODEL || 'ep-20250000000000-xxxxx',
+    endpoint: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
+    enabled: true,
+    created_at: new Date().toISOString(),
+    _apiKeyPlain: process.env.ARK_API_KEY || '',
+    description: '专门用于记忆压缩、关键词提取等后台任务'
+  }
+]
+
+// 读取本地存储，如果为空则使用默认配置
+const mockAIProviders = readStorage('ai-providers') || defaultAIProviders
 const mockMemories = readStorage('memories') || []
 const mockTools = readStorage('tools') || [
   { id: 'tool-1', name: '网页搜索', description: '实时搜索互联网信息', iconKey: '搜索', enabled: true, category: '搜索', type: 'cloud' },
@@ -546,7 +573,7 @@ async function applyMemoryForgettingCurve(memories) {
 async function extractMemoryKeywords(content) {
   try {
     const prompt = `从以下文本中提取3-8个关键实体词（人物、地点、事件、物品等），用英文逗号分隔，不要任何解释：\n\n${content}`
-    const result = await callAIProvider(null, [{ role: 'user', content: prompt }])
+    const result = await callAIProvider(null, [{ role: 'user', content: prompt }], { useHelperAI: true })
     const rawKeywords = (result.reply || '').trim()
     const keywords = rawKeywords
       .split(/[,，、\n]/)
@@ -871,20 +898,46 @@ async function executeToolCall(toolCall, enabledTools) {
 // ========== AI API 调用 ==========
 
 async function callAIProvider(provider, messages, options = {}) {
-  const { tools = null, temperature, maxTokens, topP } = options
+  const { tools = null, temperature, maxTokens, topP, useHelperAI = false } = options
   
-  // 获取启用的 AI 提供商配置
+  // ===== 【辅助AI功能】如果指定用辅助AI，优先选择配置的辅助AI
   let providers
-  if (USE_MOCK) {
-    providers = mockAIProviders.filter(p => p.enabled)
-  } else {
-    const { data } = await supabase
-      .from('ai_providers')
-      .select('*')
-      .eq('enabled', true)
-      .order('created_at', { ascending: false })
-      .limit(1)
-    providers = data
+  const helperId = process.env.HELPER_AI_PROVIDER_ID
+  
+  if (useHelperAI && helperId) {
+    // 优先用辅助AI（专门做压缩、摘要等脏活）
+    if (USE_MOCK) {
+      providers = mockAIProviders.filter(p => String(p.id) === String(helperId) && p.enabled)
+    } else {
+      const { data } = await supabase
+        .from('ai_providers')
+        .select('*')
+        .eq('enabled', true)
+        .eq('id', helperId)
+        .limit(1)
+      providers = data
+    }
+    
+    if (!providers || providers.length === 0) {
+      console.log(`[辅助AI] ID ${helperId} 不可用，回退到主AI`)
+    } else {
+      console.log(`[辅助AI] 使用ID ${helperId} 执行压缩任务，省Token！`)
+    }
+  }
+  
+  // 还是没找到，用默认主AI
+  if (!providers || providers.length === 0) {
+    if (USE_MOCK) {
+      providers = mockAIProviders.filter(p => p.enabled)
+    } else {
+      const { data } = await supabase
+        .from('ai_providers')
+        .select('*')
+        .eq('enabled', true)
+        .order('created_at', { ascending: false })
+        .limit(1)
+      providers = data
+    }
   }
 
   if (!providers || providers.length === 0) {
@@ -986,50 +1039,25 @@ async function compressMemory(chatId, messagesToCompress) {
     `${msg.role === 'user' ? '用户' : '助手'}: ${msg.content}`
   ).join('\n\n')
 
-  const { data: providers } = await supabase
-    .from('ai_providers')
-    .select('*')
-    .eq('enabled', true)
-    .order('created_at', { ascending: false })
-    .limit(1)
-
-  if (!providers || providers.length === 0) {
-    console.warn('没有可用的 AI 提供商，跳过记忆压缩')
-    return
-  }
-
-  const aiProvider = providers[0]
-
+  // ===== 【重构】统一用 callAIProvider，启用辅助AI节省Token
+  console.log(`[记忆压缩] ${messagesToCompress.length} 条对话，调用AI压缩中...`)
+  
   const compressPrompt = `请将以下对话内容压缩成一段简短的摘要，保留关键信息和要点：
 
 ${messagesText}
 
 请用简洁的语言总结上述对话。`
 
-  const response = await fetch(aiProvider.endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.ARK_API_KEY || 'mock-key'}`,
-    },
-    body: JSON.stringify({
-      model: aiProvider.model,
-      messages: [
-        { role: 'system', content: '你是一个专业的文本摘要助手，擅长将长对话压缩成简洁的摘要。' },
-        { role: 'user', content: compressPrompt }
-      ],
-      temperature: 0.3,
-      max_tokens: 500,
-    }),
+  const result = await callAIProvider(null, [
+    { role: 'system', content: '你是一个专业的文本摘要助手，擅长将长对话压缩成简洁的摘要。' },
+    { role: 'user', content: compressPrompt }
+  ], { 
+    useHelperAI: true, // 关键：启用辅助AI，不占主AI的Token！
+    temperature: 0.3, 
+    maxTokens: 500 
   })
-
-  if (!response.ok) {
-    console.warn(`记忆压缩 API 调用失败: ${response.status}`)
-    return
-  }
-
-  const data = await response.json()
-  const content = data.choices?.[0]?.message?.content || ''
+  
+  const content = result.reply || ''
 
   if (content) {
     const emotion = await analyzeEmotion(content)
