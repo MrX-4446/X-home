@@ -171,9 +171,8 @@ async function callAI(sessionId, userMessage) {
       method: 'POST',
       headers: headers,
       body: JSON.stringify({
+        chatId: sessionId,
         messages: [...history, { role: 'user', content: userMessage }],
-        use_memory: true,
-        temperature: 0.7,
       }),
     })
     
