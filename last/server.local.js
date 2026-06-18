@@ -139,7 +139,7 @@ const mockChats = readStorage('chats') || []
 const defaultAIProviders = [
   {
     id: 1,
-    name: '火山方舟 DeepSeek',
+    name: '火山方舟 DeepSeek（主AI - 对话专用）',
     provider: 'volcengine',
     model: process.env.ARK_MODEL || 'ep-20250000000000-xxxxx',
     endpoint: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
@@ -151,12 +151,12 @@ const defaultAIProviders = [
     id: 2,
     name: '火山方舟 辅助AI（记忆压缩专用）',
     provider: 'volcengine',
-    model: process.env.ARK_MODEL || 'ep-20250000000000-xxxxx',
+    model: process.env.HELPER_AI_MODEL || process.env.ARK_MODEL || 'ep-20250000000000-xxxxx',
     endpoint: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
     enabled: true,
     created_at: new Date().toISOString(),
     _apiKeyPlain: process.env.ARK_API_KEY || '',
-    description: '专门用于记忆压缩、关键词提取等后台任务'
+    description: '专门用于记忆压缩、关键词提取等后台任务，可使用低成本模型'
   }
 ]
 
@@ -609,8 +609,52 @@ function getRelatedChatIds(currentChatId) {
   return Array.from(relatedIds)
 }
 
-// ---------- 6. 增强版记忆检索 ----------
-async function surfaceMemoriesEnhanced(chatId, limit = 10) {
+// ========== 向量相似度计算 ==========
+// 简单的文本相似度计算（基于词频向量 + 余弦相似度）
+function tokenize(text) {
+  return text.toLowerCase()
+    .replace(/[^\w\u4e00-\u9fa5]/g, ' ')
+    .split(/\s+/)
+    .filter(t => t.length > 1)
+}
+
+function buildTermVector(tokens) {
+  const vector = {}
+  tokens.forEach(token => {
+    vector[token] = (vector[token] || 0) + 1
+  })
+  return vector
+}
+
+function cosineSimilarity(vecA, vecB) {
+  const allTerms = new Set([...Object.keys(vecA), ...Object.keys(vecB)])
+  let dotProduct = 0
+  let normA = 0
+  let normB = 0
+
+  allTerms.forEach(term => {
+    const a = vecA[term] || 0
+    const b = vecB[term] || 0
+    dotProduct += a * b
+    normA += a * a
+    normB += b * b
+  })
+
+  if (normA === 0 || normB === 0) return 0
+  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB))
+}
+
+// 计算两个文本的语义相似度
+function calculateTextSimilarity(textA, textB) {
+  const tokensA = tokenize(textA)
+  const tokensB = tokenize(textB)
+  const vecA = buildTermVector(tokensA)
+  const vecB = buildTermVector(tokensB)
+  return cosineSimilarity(vecA, vecB)
+}
+
+// ---------- 6. 混合记忆检索（规则 + 语义） ----------
+async function surfaceMemoriesEnhanced(chatId, userMessage = '', limit = 10) {
   // 获取所有关联会话的记忆
   const relatedChatIds = getRelatedChatIds(chatId)
   let allMemories = []
@@ -620,10 +664,10 @@ async function surfaceMemoriesEnhanced(chatId, limit = 10) {
     allMemories.push(...mems)
   }
 
-  // 打分排序（原算法保持）
   const decayRate = parseFloat(await supabaseGetSetting('memory_decay_rate') || '0.01')
   const now = new Date()
 
+  // 混合打分：语义相似度 + 规则打分
   const scored = allMemories.map(mem => {
     const created = new Date(mem.created_at)
     const hoursSinceCreated = (now - created) / (1000 * 60 * 60)
@@ -631,12 +675,31 @@ async function surfaceMemoriesEnhanced(chatId, limit = 10) {
     const emotionIntensity = Math.sqrt(mem.valence ** 2 + mem.arousal ** 2)
     const resolveBonus = mem.is_resolved ? 0.3 : 1.0
 
-    const score = (mem.importance * 0.4 +
-                   mem.activation_count * 0.2 +
-                   emotionIntensity * 0.2 +
-                   decay * 0.2) * resolveBonus
+    // 1. 规则基础分（50%权重）
+    const ruleScore = (mem.importance * 0.4 +
+                       mem.activation_count * 0.2 +
+                       emotionIntensity * 0.2 +
+                       decay * 0.2) * resolveBonus
 
-    return { ...mem, score, fromCrossSession: mem.chat_id !== chatId }
+    // 2. 语义相似度分（50%权重）
+    // 如果有用户消息，计算与记忆的语义相似度
+    let semanticScore = 0.5  // 默认中性分
+    if (userMessage && userMessage.length > 5) {
+      semanticScore = calculateTextSimilarity(userMessage, mem.content)
+      // 相似度放大：让语义相关的记忆更容易脱颖而出
+      semanticScore = Math.pow(semanticScore, 0.7)
+    }
+
+    // 3. 混合总分
+    const finalScore = ruleScore * 0.5 + semanticScore * 0.5
+
+    return { 
+      ...mem, 
+      score: finalScore,
+      ruleScore: ruleScore,
+      semanticScore: semanticScore,
+      fromCrossSession: mem.chat_id !== chatId 
+    }
   })
 
   const sorted = scored.sort((a, b) => b.score - a.score)
@@ -1462,9 +1525,18 @@ ${messagesText}
           historyMessages = await supabaseGetMessages(chatId)
         }
 
-        // 步骤三：加载记忆（使用主动浮现机制）
-        const surfacedMemories = await surfaceMemories(chatId, 5)
+        // 步骤三：加载记忆（使用混合检索机制：规则打分 + 语义相似度）
+        // 传入用户消息，让语义相关的记忆优先浮现
+        const surfacedMemories = await surfaceMemoriesEnhanced(chatId, userMessage.content, 5)
         const memorySummary = surfacedMemories.map(m => m.content).join('\n\n')
+        
+        // 打印检索日志，方便调试
+        if (surfacedMemories.length > 0) {
+          console.log(`[记忆检索] 找到 ${surfacedMemories.length} 条相关记忆`)
+          surfacedMemories.forEach((mem, idx) => {
+            console.log(`  [${idx+1}] 分数:${mem.score.toFixed(2)} (规则:${mem.ruleScore?.toFixed(2)} 语义:${mem.semanticScore?.toFixed(2)}) - ${mem.content.substring(0, 50)}...`)
+          })
+        }
 
         // 步骤四：组装上下文
         // 加载底层规则文件（所有 AI 必须遵守）
