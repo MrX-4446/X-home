@@ -210,8 +210,10 @@ body {
   flex: 1;
   display: flex;
   flex-direction: column;
+  position: relative;
   background-color: var(--background-soft);
   transition: margin-left 0.3s ease;
+  overflow: hidden;
 }
 
 .sidebar-open .chat-container {
@@ -344,6 +346,50 @@ body {
   display: flex;
   flex-direction: column;
   gap: 20px;
+}
+
+/* 新消息提示浮动按钮 - 智能滚动功能
+   当用户向上浏览历史消息时，收到新消息会显示此按钮 */
+.new-message-btn {
+  position: absolute;
+  bottom: 100px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 20px;
+  background: var(--primary-color, #7C3AED);
+  color: white;
+  border: none;
+  border-radius: 24px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(124, 58, 237, 0.4);
+  z-index: 100;
+  transition: all 0.2s ease;
+  animation: newMessageBtnFadeIn 0.3s ease-out;
+}
+
+.new-message-btn:hover {
+  transform: translateX(-50%) translateY(-2px);
+  box-shadow: 0 6px 20px rgba(124, 58, 237, 0.5);
+}
+
+.new-message-btn:active {
+  transform: translateX(-50%) translateY(0);
+}
+
+@keyframes newMessageBtnFadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 }
 
 .message {

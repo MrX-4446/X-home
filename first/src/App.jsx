@@ -98,9 +98,8 @@ function App() {
     }
   }
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [currentChat?.messages])
+  // 注意：滚动逻辑已移至 ChatArea 组件内部实现智能滚动
+  // （自动滚动 + 手动浏览检测 + 新消息提示按钮）
 
   const loadAIProviders = async () => {
     const providers = await getAIProviders()
@@ -642,6 +641,89 @@ function ChatArea({
   onOpenSettings,
   settings
 }) {
+  const messagesAreaRef = useRef(null)
+  const [showNewMessageBtn, setShowNewMessageBtn] = useState(false)
+  // 标记是否是程序触发的自动滚动，用于在滚动事件中区分用户主动滚动
+  const isAutoScrollingRef = useRef(false)
+  // 记录上一次消息数量，用于判断是否有新消息
+  const prevMessageCountRef = useRef(0)
+
+  // 判断是否滚动到底部（阈值 30px，兼容轻微的滚动偏差）
+  const checkIsAtBottom = () => {
+    const el = messagesAreaRef.current
+    if (!el) return true
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    return distanceToBottom <= 30
+  }
+
+  // 平滑滚动到底部
+  const scrollToBottom = (behavior = 'smooth') => {
+    const el = messagesAreaRef.current
+    if (!el) return
+    isAutoScrollingRef.current = true
+    el.scrollTo({
+      top: el.scrollHeight,
+      behavior: behavior
+    })
+    // 滚动动画完成后重置标记（smooth 动画约 300-500ms）
+    setTimeout(() => {
+      isAutoScrollingRef.current = false
+    }, 500)
+    setShowNewMessageBtn(false)
+  }
+
+  // 监听消息变化：智能判断是否自动滚动
+  useEffect(() => {
+    const currentCount = chat?.messages?.length || 0
+    const hasNewMessage = currentCount > prevMessageCountRef.current
+    prevMessageCountRef.current = currentCount
+
+    if (!hasNewMessage) return
+
+    // 如果当前在底部，则自动滚动到最新消息
+    if (checkIsAtBottom()) {
+      // 等待 DOM 渲染完成后再滚动
+      setTimeout(() => scrollToBottom('smooth'), 0)
+    } else {
+      // 用户正在浏览历史，显示新消息提示按钮
+      setShowNewMessageBtn(true)
+    }
+  }, [chat?.messages?.length])
+
+  // 监听 isTyping 变化：AI 开始打字时，如果在底部也自动滚动
+  useEffect(() => {
+    if (isTyping && checkIsAtBottom()) {
+      setTimeout(() => scrollToBottom('smooth'), 0)
+    }
+  }, [isTyping])
+
+  // 滚动事件监听：区分用户主动滚动和自动滚动
+  useEffect(() => {
+    const el = messagesAreaRef.current
+    if (!el) return
+
+    const handleScroll = () => {
+      // 如果是程序触发的自动滚动，不处理
+      if (isAutoScrollingRef.current) return
+
+      // 用户主动滚动：检测是否到达底部
+      if (checkIsAtBottom()) {
+        setShowNewMessageBtn(false)
+      }
+    }
+
+    el.addEventListener('scroll', handleScroll, { passive: true })
+    return () => el.removeEventListener('scroll', handleScroll)
+  }, [])
+
+  // 切换聊天时重置状态并滚动到底部
+  useEffect(() => {
+    prevMessageCountRef.current = chat?.messages?.length || 0
+    setShowNewMessageBtn(false)
+    // 切换会话后立即滚动到底部（使用 auto 避免动画）
+    setTimeout(() => scrollToBottom('auto'), 0)
+  }, [chat?.id])
+
   return (
     <div className="chat-container">
       <ChatHeader 
@@ -652,7 +734,7 @@ function ChatArea({
           chatTitle={chat?.title || ''}
           onOpenSettings={onOpenSettings}
         />
-      <div className="messages-area">
+      <div className="messages-area" ref={messagesAreaRef}>
         {!chat || chat.messages?.length === 0 ? (
           <div style={{ 
             display: 'flex', 
@@ -671,6 +753,19 @@ function ChatArea({
         {isTyping && <TypingIndicator />}
         <div ref={messagesEndRef} />
       </div>
+      {/* 新消息提示浮动按钮 */}
+      {showNewMessageBtn && (
+        <button
+          className="new-message-btn"
+          onClick={() => scrollToBottom('smooth')}
+          title="跳转到最新消息"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+          新消息
+        </button>
+      )}
       <InputArea
         inputValue={inputValue}
         setInputValue={setInputValue}
