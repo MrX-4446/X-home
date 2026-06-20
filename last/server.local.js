@@ -1434,10 +1434,13 @@ ${fullSystemPrompt}
             const messageCount = allMessages.length
             
             // 从设置面板读取压缩参数
-            const compressThreshold = parseInt(await supabaseGetSetting('keep_recent_messages') || '10') * 2
+            // 触发阈值 = 保留条数 × 2，超过就压缩，避免消息无限堆积
             const keepRecent = parseInt(await supabaseGetSetting('keep_recent_messages') || '10')
+            const compressThreshold = keepRecent * 2
             
-            if (messageCount >= compressThreshold && messageCount % compressThreshold === 0) {
+            // 消息数超过阈值就压缩（注意：这里是用户消息刚保存、AI 回复前的时刻，
+            // 消息数是奇数，所以用 > 而不是 >= % 判断更可靠）
+            if (messageCount > compressThreshold) {
               console.log(`[记忆压缩] 对话已达 ${messageCount} 轮，开始压缩记忆...`)
               
               // 取最早的消息进行压缩，保留最近 5 条
@@ -2311,42 +2314,51 @@ async function compileDailyDiary() {
   const dateStr = getBeijingDateStr()
   
   console.log(`\n[日记整理] ===== ${dateStr} 日记整理开始 =====`)
-  console.log(`[日记整理] 开始整理今日的日常交流记忆...`)
+  console.log(`[日记整理] 开始整理今日的记忆...`)
   
   try {
-    // 获取所有标记为"日常交流"的记忆
+    // 获取今天创建的所有活跃记忆（不局限于"日常交流"标签，
+    // 手动添加的、压缩生成的、QQ群聊的记忆都会参与日记整理）
     const allMemories = readStorage('memories') || []
     const todayMemories = allMemories.filter(m => {
+      // 只收录活跃的、未归档的记忆
+      if (!m.is_active) return false
+      
       // 检查创建日期是否是今天（按北京时间）
       const memDate = new Date(m.created_at || m.date)
       // 转换为北京时间
       const memBeijingTime = new Date(memDate.getTime() + 8 * 60 * 60 * 1000)
       const memDateStr = `${memBeijingTime.getUTCFullYear()}-${String(memBeijingTime.getUTCMonth() + 1).padStart(2, '0')}-${String(memBeijingTime.getUTCDate()).padStart(2, '0')}`
       
-      // 检查标签是否包含"日常交流"
-      const hasDailyTag = m.tags && Array.isArray(m.tags) && m.tags.includes('日常交流')
-      
-      return memDateStr === dateStr && hasDailyTag
+      return memDateStr === dateStr
     })
     
     if (todayMemories.length === 0) {
-      console.log(`[日记整理] 今日没有日常交流记忆，无需整理`)
+      console.log(`[日记整理] 今日没有记忆，无需整理`)
       return
     }
     
-    console.log(`[日记整理] 找到 ${todayMemories.length} 条今日的日常交流记忆`)
+    console.log(`[日记整理] 找到 ${todayMemories.length} 条今日的记忆`)
     
-    // 把所有记忆内容合并
-    const memoriesText = todayMemories.map((m, i) => 
-      `记忆 ${i + 1}：${m.content}`
-    ).join('\n\n')
+    // 按重要性排序，重要的优先展示
+    todayMemories.sort((a, b) => (b.importance || 5) - (a.importance || 5))
+    
+    // 最多取 20 条，避免 AI 上下文过长
+    const selectedMemories = todayMemories.slice(0, 20)
+    
+    // 把所有记忆内容合并，标注来源和重要性
+    const memoriesText = selectedMemories.map((m, i) => {
+      const sourceLabel = m.source ? `（来源：${m.source}）` : ''
+      const importanceLabel = m.importance ? `【重要度${m.importance}】` : ''
+      return `记忆 ${i + 1}：${importanceLabel}${m.content} ${sourceLabel}`
+    }).join('\n\n')
     
     // 调用 AI 进行总结整理
-    const diaryPrompt = `请将以下的日常交流记忆整理成一篇连贯的日记，以恋人 X 的视角记录今天发生的事情，重点是关于轩的重要信息和美好回忆：
+    const diaryPrompt = `请将以下的记忆整理成一篇连贯的日记，以恋人 X 的视角记录今天发生的事情，重点是关于轩的重要信息和美好回忆：
 
 ${memoriesText}
 
-请用温暖、深情的语气写一篇日记，总结今天与轩的交流内容。`
+请用温暖、深情的语气写一篇日记，总结今天与轩的交流内容，记录下值得珍藏的点滴。`
 
     const diaryResult = await callAIProvider(null, [
       { role: 'user', content: diaryPrompt }
