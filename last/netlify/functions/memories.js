@@ -99,6 +99,8 @@ async function listMemories(params) {
   if (isPinned !== undefined) query = query.eq('is_pinned', isPinned)
   if (isResolved !== undefined) query = query.eq('is_resolved', isResolved)
   if (params.source) query = query.eq('source', params.source)
+  // 按标签过滤（tags 为 text[] 类型，使用 contains 匹配包含该标签的记录）
+  if (params.tag) query = query.contains('tags', [params.tag])
 
   const { data, error } = await query.order('created_at', { ascending: false })
   if (error) throw error
@@ -162,6 +164,7 @@ exports.handler = async (event) => {
         is_resolved: Boolean(body.is_resolved),
         is_active: body.is_active !== undefined ? Boolean(body.is_active) : true,
         source: body.source || null,
+        tags: Array.isArray(body.tags) ? body.tags : null,
       }
 
       const { data, error } = await supabase.from('memories').insert([memoryData]).select().single()

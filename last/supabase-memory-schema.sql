@@ -12,6 +12,7 @@ ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN DEFAULT FALSE,
 ADD COLUMN IF NOT EXISTS is_resolved BOOLEAN DEFAULT FALSE,
 ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE,
 ADD COLUMN IF NOT EXISTS source TEXT,
+ADD COLUMN IF NOT EXISTS tags TEXT[] DEFAULT '{}',
 ADD COLUMN IF NOT EXISTS activation_count INTEGER DEFAULT 0,
 ADD COLUMN IF NOT EXISTS last_activated_at TIMESTAMPTZ;
 
@@ -27,6 +28,7 @@ CREATE TABLE IF NOT EXISTS memories (
   is_resolved BOOLEAN DEFAULT FALSE,
   is_active BOOLEAN DEFAULT TRUE,
   source TEXT,
+  tags TEXT[] DEFAULT '{}',
   activation_count INTEGER DEFAULT 0,
   last_activated_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -61,6 +63,8 @@ CREATE INDEX IF NOT EXISTS idx_memories_is_active ON memories(is_active);
 CREATE INDEX IF NOT EXISTS idx_memories_is_pinned ON memories(is_pinned);
 CREATE INDEX IF NOT EXISTS idx_memories_is_resolved ON memories(is_resolved);
 CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at);
+CREATE INDEX IF NOT EXISTS idx_memories_source ON memories(source);
+CREATE INDEX IF NOT EXISTS idx_memories_tags ON memories USING GIN(tags);
 CREATE INDEX IF NOT EXISTS idx_knowledge_documents_room ON knowledge_documents(room);
 CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_document_id ON knowledge_chunks(document_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_room ON knowledge_chunks(room);

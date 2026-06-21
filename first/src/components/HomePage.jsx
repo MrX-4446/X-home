@@ -1,4 +1,4 @@
-function HomePage({ onStartChat, onNewChat, latestChat, onOpenAppSettings, onOpenToolConfig, onOpenMemory, onOpenAppCheck, onOpenReading }) {
+function HomePage({ onStartChat, onNewChat, latestChat, onOpenAppSettings, onOpenToolConfig, onOpenMemory, onOpenDiary, onOpenAppCheck, onOpenReading }) {
   // 从最近一条聊天中提取展示信息：聊天对象名 + 最后一条消息内容
   const messages = latestChat?.messages || []
   const lastMsg = messages[messages.length - 1]
@@ -42,6 +42,9 @@ function HomePage({ onStartChat, onNewChat, latestChat, onOpenAppSettings, onOpe
             </div>
             <div className="module-card" onClick={onOpenMemory}>
               <div className="module-name">记忆</div>
+            </div>
+            <div className="module-card" onClick={onOpenDiary}>
+              <div className="module-name">日记</div>
             </div>
             <div className="module-card" onClick={onOpenToolConfig}>
               <div className="module-name">工作间</div>

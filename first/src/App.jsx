@@ -6,6 +6,7 @@ import AIConfigPanel from './components/AIConfigPanel'
 import CustomSelect from './components/CustomSelect'
 import ToolConfigPanel from './components/ToolConfigPanel'
 import MemoryPanel from './components/MemoryPanel'
+import DiaryPanel from './components/DiaryPanel'
 import AppCheckPanel from './components/AppCheckPanel'
 import ReadingPartner from './components/ReadingPartner'
 import errorMonitor from './lib/errorMonitor'
@@ -52,6 +53,7 @@ function App() {
   const [returnToAppSettings, setReturnToAppSettings] = useState(false)
   const [toolConfigOpen, setToolConfigOpen] = useState(false)
   const [memoryOpen, setMemoryOpen] = useState(false)
+  const [diaryOpen, setDiaryOpen] = useState(false)
   const [appCheckOpen, setAppCheckOpen] = useState(false)
   const [readingOpen, setReadingOpen] = useState(false) // 共读伴侣界面
   const [toolList, setToolList] = useState([
@@ -313,6 +315,7 @@ function App() {
           onOpenAppSettings={() => setAppSettingsOpen(true)}
           onOpenToolConfig={() => setToolConfigOpen(true)}
           onOpenMemory={() => setMemoryOpen(true)}
+          onOpenDiary={() => setDiaryOpen(true)}
           onOpenAppCheck={() => setAppCheckOpen(true)}
           onOpenReading={() => setReadingOpen(true)}
         />
@@ -392,6 +395,12 @@ function App() {
       {memoryOpen && (
         <MemoryPanel 
           onClose={() => setMemoryOpen(false)}
+        />
+      )}
+
+      {diaryOpen && (
+        <DiaryPanel
+          onClose={() => setDiaryOpen(false)}
         />
       )}
 
