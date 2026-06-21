@@ -73,6 +73,14 @@ const StarIcon = ({ size = 14 }) => (
   </svg>
 )
 
+// 关闭图标 - 用于详情弹窗
+const CloseIcon = ({ size = 20 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="18" y1="6" x2="6" y2="18"></line>
+    <line x1="6" y1="6" x2="18" y2="18"></line>
+  </svg>
+)
+
 function MemoryPanel({ onClose }) {
   const [memories, setMemories] = useState([])
   const [searchQuery, setSearchQuery] = useState('')
@@ -90,6 +98,8 @@ function MemoryPanel({ onClose }) {
   const [showAddTagModal, setShowAddTagModal] = useState(false)
   const [addingTagToMemoryId, setAddingTagToMemoryId] = useState(null)
   const [newTagInput, setNewTagInput] = useState('')
+  const [showDetail, setShowDetail] = useState(false)  // 是否显示详情弹窗
+  const [selectedMemory, setSelectedMemory] = useState(null)  // 当前查看的记忆
 
   const [newMemory, setNewMemory] = useState({
     content: '',
@@ -122,6 +132,23 @@ function MemoryPanel({ onClose }) {
       return () => document.removeEventListener('click', handleClickOutside)
     }
   }, [contextMenu])
+
+  // ESC 键关闭详情弹窗
+  useEffect(() => {
+    const handleEsc = (e) => {
+      if (e.key === 'Escape' && showDetail) {
+        handleCloseDetail()
+      }
+    }
+    if (showDetail) {
+      document.addEventListener('keydown', handleEsc)
+      document.body.style.overflow = 'hidden'  // 禁止背景滚动
+      return () => {
+        document.removeEventListener('keydown', handleEsc)
+        document.body.style.overflow = ''
+      }
+    }
+  }, [showDetail])
 
   // 显示标签操作菜单
   const showTagActionMenu = (x, y, memoryId, tag) => {
@@ -284,6 +311,18 @@ function MemoryPanel({ onClose }) {
       tags: memory.tags || [],
     })
     setShowAddPanel(true)
+  }
+
+  // 打开记忆详情
+  const handleViewDetail = (memory) => {
+    setSelectedMemory(memory)
+    setShowDetail(true)
+  }
+
+  // 关闭记忆详情
+  const handleCloseDetail = () => {
+    setShowDetail(false)
+    setSelectedMemory(null)
   }
 
   const handleSaveEdit = async () => {
@@ -673,7 +712,11 @@ function MemoryPanel({ onClose }) {
               </div>
             ) : (
               filteredMemories.map(memory => (
-                <div key={memory.id} className={`memory-card ${memory.is_pinned ? 'pinned' : ''} ${memory.is_resolved ? 'resolved' : ''} ${!memory.is_active ? 'archived' : ''}`}>
+                <div key={memory.id} 
+                  className={`memory-card ${memory.is_pinned ? 'pinned' : ''} ${memory.is_resolved ? 'resolved' : ''} ${!memory.is_active ? 'archived' : ''}`}
+                  onClick={() => handleViewDetail(memory)}
+                  style={{ cursor: 'pointer' }}
+                >
                   <div className="memory-header">
                     <div className="memory-meta">
                       <div className="importance-badge" style={{ backgroundColor: getImportanceColor(memory.importance) }}>
@@ -686,13 +729,13 @@ function MemoryPanel({ onClose }) {
                     </div>
                     <div className="memory-status">
                       {memory.is_pinned && (
-                        <button className="status-btn pinned-btn" onClick={() => handleTogglePin(memory)}>
+                        <button className="status-btn pinned-btn" onClick={(e) => { e.stopPropagation(); handleTogglePin(memory); }}>
                           <PinIcon filled />
                           置顶
                         </button>
                       )}
                       {memory.is_resolved && (
-                        <button className="status-btn resolved-btn" onClick={() => handleToggleResolve(memory)}>
+                        <button className="status-btn resolved-btn" onClick={(e) => { e.stopPropagation(); handleToggleResolve(memory); }}>
                           <CheckIcon filled />
                           已解决
                         </button>
@@ -705,7 +748,7 @@ function MemoryPanel({ onClose }) {
                       <span 
                         key={tag} 
                         className="memory-tag"
-                        onClick={() => setTagFilter(tagFilter === tag ? '' : tag)}
+                        onClick={(e) => { e.stopPropagation(); setTagFilter(tagFilter === tag ? '' : tag); }}
                         onContextMenu={(e) => handleTagContextMenu(e, memory.id, tag)}
                         onTouchStart={(e) => handleLongPressStart(e, memory.id, tag)}
                         onTouchEnd={handleLongPressEnd}
@@ -750,7 +793,7 @@ function MemoryPanel({ onClose }) {
                       {memory.chat_id && (
                         <span 
                           className="memory-chatid" 
-                          onClick={() => navigator.clipboard.writeText(memory.chat_id)}
+                          onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(memory.chat_id); }}
                           style={{ cursor: 'pointer', color: '#7C3AED', fontFamily: 'monospace' }}
                           title="点击复制chat_id"
                         >会话: {memory.chat_id} 📋</span>
@@ -759,15 +802,15 @@ function MemoryPanel({ onClose }) {
                       {memory.created_at && <span className="memory-date">{new Date(memory.created_at).toLocaleDateString()}</span>}
                     </div>
                     <div className="memory-actions">
-                      <button className="memory-action-btn" onClick={() => handleEditMemory(memory)}>
+                      <button className="memory-action-btn" onClick={(e) => { e.stopPropagation(); handleEditMemory(memory); }}>
                         <EditIcon />
                       </button>
                       {memory.is_active ? (
-                        <button className="memory-action-btn archive" onClick={() => handleArchive(memory)}>归档</button>
+                        <button className="memory-action-btn archive" onClick={(e) => { e.stopPropagation(); handleArchive(memory); }}>归档</button>
                       ) : (
-                        <button className="memory-action-btn restore" onClick={() => handleRestore(memory)}>恢复</button>
+                        <button className="memory-action-btn restore" onClick={(e) => { e.stopPropagation(); handleRestore(memory); }}>恢复</button>
                       )}
-                      <button className="memory-action-btn delete" onClick={() => handleDeleteMemory(memory.id)}>
+                      <button className="memory-action-btn delete" onClick={(e) => { e.stopPropagation(); handleDeleteMemory(memory.id); }}>
                         <TrashIcon />
                       </button>
                     </div>
@@ -925,6 +968,314 @@ function MemoryPanel({ onClose }) {
                 disabled={!newTagInput.trim()}
               >
                 添加
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 记忆详情弹窗 */}
+      {showDetail && selectedMemory && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: isMobile ? 'flex-end' : 'center',
+          justifyContent: 'center',
+          zIndex: 99999999,
+          padding: isMobile ? '0' : '20px',
+        }} onClick={handleCloseDetail}>
+          <div style={{
+            background: 'white',
+            borderRadius: isMobile ? '24px 24px 0 0' : '20px',
+            padding: isMobile ? '30px 24px 40px' : '32px',
+            width: '100%',
+            maxWidth: isMobile ? '100%' : '600px',
+            maxHeight: isMobile ? '85vh' : '80vh',
+            overflowY: 'auto',
+            position: 'relative',
+          }} onClick={(e) => e.stopPropagation()}>
+            {/* 移动端顶部拖拽条 */}
+            {isMobile && (
+              <div style={{
+                width: '40px',
+                height: '4px',
+                background: 'rgba(138, 133, 128, 0.3)',
+                borderRadius: '2px',
+                margin: '-10px auto 20px auto',
+              }} />
+            )}
+            {/* 关闭按钮 */}
+            <button
+              onClick={handleCloseDetail}
+              style={{
+                position: 'absolute',
+                top: isMobile ? '20px' : '20px',
+                right: isMobile ? '20px' : '20px',
+                width: '36px',
+                height: '36px',
+                borderRadius: '50%',
+                border: 'none',
+                background: 'rgba(138, 133, 128, 0.1)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#6b7280',
+                transition: 'background 0.2s ease',
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(138, 133, 128, 0.2)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(138, 133, 128, 0.1)'}
+            >
+              <CloseIcon size={18} />
+            </button>
+
+            {/* 详情头部：重要度和情感标签 */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
+              <div style={{
+                padding: '4px 12px',
+                borderRadius: '20px',
+                fontSize: '13px',
+                fontWeight: '600',
+                color: 'white',
+                backgroundColor: getImportanceColor(selectedMemory.importance),
+              }}>
+                重要度 {selectedMemory.importance}
+              </div>
+              <span style={{
+                padding: '4px 12px',
+                borderRadius: '20px',
+                fontSize: '12px',
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                color: '#dc2626',
+              }}>{getValenceLabel(selectedMemory.valence)}</span>
+              <span style={{
+                padding: '4px 12px',
+                borderRadius: '20px',
+                fontSize: '12px',
+                backgroundColor: 'rgba(37, 99, 235, 0.15)',
+                color: '#1d4ed8',
+              }}>{getArousalLabel(selectedMemory.arousal)}</span>
+              {selectedMemory.is_pinned && (
+                <span style={{
+                  padding: '4px 12px',
+                  borderRadius: '20px',
+                  fontSize: '12px',
+                  backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                  color: '#d97706',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                }}><PinIcon filled size={12} /> 置顶</span>
+              )}
+              {selectedMemory.is_resolved && (
+                <span style={{
+                  padding: '4px 12px',
+                  borderRadius: '20px',
+                  fontSize: '12px',
+                  backgroundColor: 'rgba(34, 197, 94, 0.15)',
+                  color: '#16a34a',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                }}><CheckIcon filled size={12} /> 已解决</span>
+              )}
+              {!selectedMemory.is_active && (
+                <span style={{
+                  padding: '4px 12px',
+                  borderRadius: '20px',
+                  fontSize: '12px',
+                  backgroundColor: 'rgba(107, 114, 128, 0.15)',
+                  color: '#6b7280',
+                }}>已归档</span>
+              )}
+            </div>
+
+            {/* 完整内容 */}
+            <div style={{
+              fontSize: isMobile ? '16px' : '15px',
+              lineHeight: '1.8',
+              color: '#1f2937',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              marginBottom: '24px',
+              padding: '16px',
+              background: 'rgba(124, 58, 237, 0.03)',
+              borderRadius: '12px',
+              border: '1px solid rgba(124, 58, 237, 0.08)',
+            }}>{selectedMemory.content}</div>
+
+            {/* 标签 */}
+            {selectedMemory.tags && selectedMemory.tags.length > 0 && (
+              <div style={{ marginBottom: '20px' }}>
+                <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '8px', fontWeight: '500' }}>标签</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  {selectedMemory.tags.map(tag => (
+                    <span key={tag} style={{
+                      padding: '6px 14px',
+                      borderRadius: '20px',
+                      fontSize: '13px',
+                      backgroundColor: 'var(--background-soft)',
+                      color: '#6b7280',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                    }}>#{tag}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 详细信息 */}
+            <div style={{ 
+              borderTop: '1px solid rgba(0,0,0,0.06)', 
+              paddingTop: '20px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+            }}>
+              {selectedMemory.source && (
+                <div style={{ fontSize: '13px', color: '#6b7280' }}>
+                  <span style={{ fontWeight: '500', color: '#374151' }}>来源：</span>{selectedMemory.source}
+                </div>
+              )}
+              {selectedMemory.chat_id && (
+                <div style={{ 
+                  fontSize: '13px', 
+                  color: '#6b7280',
+                  cursor: 'pointer',
+                }} onClick={() => {
+                  navigator.clipboard.writeText(selectedMemory.chat_id);
+                }}>
+                  <span style={{ fontWeight: '500', color: '#374151' }}>会话ID：</span>
+                  <span style={{ fontFamily: 'monospace', color: '#7C3AED' }}>{selectedMemory.chat_id} 📋</span>
+                </div>
+              )}
+              <div style={{ fontSize: '13px', color: '#6b7280' }}>
+                <span style={{ fontWeight: '500', color: '#374151' }}>命中次数：</span>{selectedMemory.activation_count || 0} 次
+              </div>
+              {selectedMemory.created_at && (
+                <div style={{ fontSize: '13px', color: '#6b7280' }}>
+                  <span style={{ fontWeight: '500', color: '#374151' }}>创建时间：</span>{new Date(selectedMemory.created_at).toLocaleString()}
+                </div>
+              )}
+              {selectedMemory.updated_at && (
+                <div style={{ fontSize: '13px', color: '#6b7280' }}>
+                  <span style={{ fontWeight: '500', color: '#374151' }}>更新时间：</span>{new Date(selectedMemory.updated_at).toLocaleString()}
+                </div>
+              )}
+              {selectedMemory.last_accessed_at && (
+                <div style={{ fontSize: '13px', color: '#6b7280' }}>
+                  <span style={{ fontWeight: '500', color: '#374151' }}>最后访问：</span>{new Date(selectedMemory.last_accessed_at).toLocaleString()}
+                </div>
+              )}
+            </div>
+
+            {/* 操作按钮 */}
+            <div style={{
+              marginTop: '24px',
+              display: 'flex',
+              gap: '10px',
+              flexWrap: 'wrap',
+            }}>
+              <button
+                onClick={(e) => { e.stopPropagation(); handleEditMemory(selectedMemory); handleCloseDetail(); }}
+                style={{
+                  flex: 1,
+                  padding: isMobile ? '14px' : '10px 16px',
+                  border: '1px solid rgba(124, 58, 237, 0.3)',
+                  borderRadius: isMobile ? '14px' : '10px',
+                  fontSize: isMobile ? '15px' : '14px',
+                  cursor: 'pointer',
+                  background: 'white',
+                  color: '#7C3AED',
+                  fontWeight: '500',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                <EditIcon /> 编辑
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); handleTogglePin(selectedMemory); handleCloseDetail(); loadMemories(); }}
+                style={{
+                  flex: 1,
+                  padding: isMobile ? '14px' : '10px 16px',
+                  border: 'none',
+                  borderRadius: isMobile ? '14px' : '10px',
+                  fontSize: isMobile ? '15px' : '14px',
+                  cursor: 'pointer',
+                  background: selectedMemory.is_pinned ? 'rgba(138, 133, 128, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                  color: selectedMemory.is_pinned ? '#8A8580' : '#d97706',
+                  fontWeight: '500',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                <PinIcon filled={selectedMemory.is_pinned} /> {selectedMemory.is_pinned ? '取消置顶' : '置顶'}
+              </button>
+              {selectedMemory.is_active ? (
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleArchive(selectedMemory); handleCloseDetail(); }}
+                  style={{
+                    flex: 1,
+                    padding: isMobile ? '14px' : '10px 16px',
+                    border: 'none',
+                    borderRadius: isMobile ? '14px' : '10px',
+                    fontSize: isMobile ? '15px' : '14px',
+                    cursor: 'pointer',
+                    background: 'rgba(107, 114, 128, 0.1)',
+                    color: '#6b7280',
+                    fontWeight: '500',
+                    transition: 'all 0.2s ease',
+                  }}
+                >归档</button>
+              ) : (
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleRestore(selectedMemory); handleCloseDetail(); }}
+                  style={{
+                    flex: 1,
+                    padding: isMobile ? '14px' : '10px 16px',
+                    border: 'none',
+                    borderRadius: isMobile ? '14px' : '10px',
+                    fontSize: isMobile ? '15px' : '14px',
+                    cursor: 'pointer',
+                    background: 'rgba(34, 197, 94, 0.1)',
+                    color: '#16a34a',
+                    fontWeight: '500',
+                    transition: 'all 0.2s ease',
+                  }}
+                >恢复</button>
+              )}
+              <button
+                onClick={(e) => { e.stopPropagation(); handleDeleteMemory(selectedMemory.id); handleCloseDetail(); }}
+                style={{
+                  padding: isMobile ? '14px 20px' : '10px 16px',
+                  border: 'none',
+                  borderRadius: isMobile ? '14px' : '10px',
+                  fontSize: isMobile ? '15px' : '14px',
+                  cursor: 'pointer',
+                  background: 'rgba(239, 68, 68, 0.1)',
+                  color: '#dc2626',
+                  fontWeight: '500',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                <TrashIcon />
               </button>
             </div>
           </div>
