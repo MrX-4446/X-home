@@ -664,6 +664,19 @@ async function surfaceMemoriesEnhanced(chatId, userMessage = '', limit = 10) {
     allMemories.push(...mems)
   }
 
+  // 【修复】同时检索全局记忆（chat_id 为 null 的日记等），日记在所有会话中都可见
+  if (USE_MOCK) {
+    const globalMems = (readStorage('memories') || []).filter(m => !m.chat_id && m.is_active)
+    allMemories.push(...globalMems)
+  } else {
+    const { data: globalMems } = await supabase
+      .from('memories')
+      .select('*')
+      .is('chat_id', null)
+      .eq('is_active', true)
+    if (globalMems) allMemories.push(...globalMems)
+  }
+
   const decayRate = parseFloat(await supabaseGetSetting('memory_decay_rate') || '0.01')
   const now = new Date()
 
@@ -712,6 +725,14 @@ async function surfaceMemoriesEnhanced(chatId, userMessage = '', limit = 10) {
 // ========== 主动浮现机制 ==========
 async function surfaceMemories(chatId, limit = 10) {
   const memories = await supabaseGetMemories(chatId, { is_active: true })
+
+  // 【修复】同时检索全局记忆（chat_id 为 null 的日记等）
+  const { data: globalMems } = await supabase
+    .from('memories')
+    .select('*')
+    .is('chat_id', null)
+    .eq('is_active', true)
+  if (globalMems) memories.push(...globalMems)
 
   const decayRate = parseFloat(await supabaseGetSetting('memory_decay_rate') || '0.01')
 
@@ -1304,7 +1325,8 @@ const server = http.createServer(async (req, res) => {
           
           // ========== 【新增】加载并浮现记忆 ==========
           const allMemories = readStorage('memories') || []
-          const chatMemories = allMemories.filter(m => !m.chat_id || m.chat_id === chatId)
+          // 【修复】只加载活跃记忆，并包含全局日记（chat_id 为 null）
+          const chatMemories = allMemories.filter(m => m.is_active && (!m.chat_id || m.chat_id === chatId))
           
           // 简单的记忆评分和排序
           const now = new Date()
@@ -1460,9 +1482,10 @@ ${messagesText}
 请用简洁的语言总结上述对话，突出需要记住的用户信息。`
 
                 try {
+                  // 【修复】记忆压缩使用辅助AI，不占用主AI Token
                   const summaryResult = await callAIProvider(null, [
                     { role: 'user', content: compressPrompt }
-                  ])
+                  ], { useHelperAI: true, temperature: 0.3, maxTokens: 500 })
                   
                   if (summaryResult.reply && summaryResult.reply.trim()) {
                     const newMemory = {
@@ -1839,9 +1862,11 @@ ${messagesText}
         // ---------- 【跨会话检索】----------
         if (crossSession && chatId) {
           const relatedChatIds = getRelatedChatIds(chatId)
-          mockMemories = mockMemories.filter(m => relatedChatIds.includes(m.chat_id))
+          // 【修复】同时包含关联会话记忆和全局记忆（日记）
+          mockMemories = mockMemories.filter(m => relatedChatIds.includes(m.chat_id) || !m.chat_id)
         } else if (chatId) {
-          mockMemories = mockMemories.filter(m => m.chat_id === chatId)
+          // 【修复】同时包含当前会话记忆和全局记忆（日记）
+          mockMemories = mockMemories.filter(m => m.chat_id === chatId || !m.chat_id)
         }
 
         if (isActive !== null) mockMemories = mockMemories.filter(m => m.is_active === (isActive === 'true'))
@@ -1976,7 +2001,8 @@ ${messagesText}
 
       if (USE_MOCK) {
         let mockMemories = readStorage('memories') || []
-        if (chatId) mockMemories = mockMemories.filter(m => m.chat_id === chatId)
+        // 【修复】同时包含当前会话的记忆和全局记忆（chat_id 为 null 的日记）
+        if (chatId) mockMemories = mockMemories.filter(m => m.chat_id === chatId || !m.chat_id)
         mockMemories = mockMemories.filter(m => m.is_active)
         return sendJson(res, 200, { data: mockMemories.slice(0, limit) })
       }
@@ -2385,10 +2411,40 @@ ${memoriesText}
       }
       
       allMemories.push(newDiary)
-      writeStorage('memories', allMemories)
+      
+      // 【新增】写完日记后，自动归档用过的记忆（尤其是压缩生成的记忆）
+      // 日记已经总结了当天的内容，原始压缩记忆等中间产物不需要继续浮现
+      let archivedCount = 0
+      const updatedMemories = allMemories.map(m => {
+        // 跳过新创建的日记本身
+        if (m.id === newDiary.id) return m
+        // 跳过已归档的
+        if (!m.is_active) return m
+        // 跳过置顶的（用户特意保留的）
+        if (m.is_pinned) return m
+        // 跳过手动日记（用户自己写的）
+        if (m.source === 'manual_diary') return m
+        
+        // 检查是否是今天参与整理的记忆
+        const memDate = new Date(m.created_at || m.date)
+        const memBeijingTime = new Date(memDate.getTime() + 8 * 60 * 60 * 1000)
+        const memDateStr = `${memBeijingTime.getUTCFullYear()}-${String(memBeijingTime.getUTCMonth() + 1).padStart(2, '0')}-${String(memBeijingTime.getUTCDate()).padStart(2, '0')}`
+        
+        if (memDateStr === dateStr) {
+          // 归档：压缩记忆必须归档，其他当天非置顶记忆也归档
+          if (m.source === 'compression' || selectedMemories.some(s => s.id === m.id)) {
+            archivedCount++
+            return { ...m, is_active: false, updated_at: new Date().toISOString() }
+          }
+        }
+        return m
+      })
+      
+      writeStorage('memories', updatedMemories)
       
       console.log(`[日记整理] 成功！生成了 ${dateStr} 的日记`)
       console.log(`[日记整理] 日记摘要: ${diaryResult.reply.trim().substring(0, 150)}...`)
+      console.log(`[日记整理] 已自动归档 ${archivedCount} 条用过的记忆（含压缩记忆）`)
     }
     
   } catch (err) {
