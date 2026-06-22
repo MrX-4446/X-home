@@ -207,7 +207,7 @@ function getSetting(key) {
 // ========== 情感分析自动打标 ==========
 async function analyzeEmotion(content) {
   try {
-    const providers = readStorage('ai_providers') || []
+    const providers = readStorage('ai-providers') || []
     const enabledProviders = providers.filter(p => p.enabled).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
 
     if (!enabledProviders || enabledProviders.length === 0) {
@@ -782,7 +782,7 @@ async function callAIProvider(provider, messages, options = {}) {
   }
   
   if (!providers || providers.length === 0) {
-    const storedProviders = readStorage('ai_providers') || []
+    const storedProviders = readStorage('ai-providers') || []
     providers = storedProviders.filter(p => p.enabled)
   }
 
