@@ -4880,6 +4880,26 @@ select.ai-form-input option:first-child {
 }
 
 /* AI 整理按钮 */
+.compile-date-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.compile-date-input {
+  padding: 8px 10px;
+  border: 1px solid rgba(122, 138, 153, 0.2);
+  border-radius: var(--radius-md);
+  background-color: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.compile-date-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .compile-btn {
   display: flex;
   align-items: center;

@@ -1542,15 +1542,16 @@ ${messagesText}
     // ===== 日记管理 API =====
     if (pathname === '/api/diary/compile' && req.method === 'POST') {
       const body = await readBody(req)
-      const dateStr = body.date || null
+      const dateStr = /^\d{4}-\d{2}-\d{2}$/.test(String(body.date || '')) ? body.date : null
+      const targetDateStr = dateStr || getBeijingDateStr()
       
-      console.log(`\n[日记 API] 手动触发日记整理，日期: ${dateStr || '今天'}\n`)
+      console.log(`\n[日记 API] 手动触发日记整理，日期: ${targetDateStr}\n`)
       
       try {
-        await compileDailyDiary(dateStr)
+        await compileDailyDiary(targetDateStr)
         return sendJson(res, 200, { 
           ok: true, 
-          message: dateStr ? `已整理 ${dateStr} 的日记` : '已整理今日日记' 
+          message: `已整理 ${targetDateStr} 的日记` 
         })
       } catch (err) {
         console.error('[日记 API] 整理失败:', err)
@@ -1869,7 +1870,7 @@ function getBeijingDateStr() {
 // dateStr 参数可选，不传则整理今天的日记
 async function compileDailyDiary(dateStr = null) {
   // 如果没有指定日期，使用今天的日期
-  const targetDateStr = dateStr || getBeijingDateStr()
+  const targetDateStr = /^\d{4}-\d{2}-\d{2}$/.test(String(dateStr || '')) ? dateStr : getBeijingDateStr()
   
   console.log(`\n[日记整理] ===== ${targetDateStr} 日记整理开始 =====`)
   console.log(`[日记整理] 开始整理记忆...`)
@@ -1878,6 +1879,7 @@ async function compileDailyDiary(dateStr = null) {
     const allMemories = readStorage('memories') || []
     const todayMemories = allMemories.filter(m => {
       if (!m.is_active) return false
+      if (m.source === 'daily_diary' || m.source === 'manual_diary') return false
       
       const memDate = new Date(m.created_at || m.date)
       const memBeijingTime = new Date(memDate.getTime() + 8 * 60 * 60 * 1000)

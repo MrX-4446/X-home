@@ -128,6 +128,7 @@ function DiaryPanel({ onClose }) {
   const [diaryStatus, setDiaryStatus] = useState(null)
   const [isCompiling, setIsCompiling] = useState(false)
   const [compileMessage, setCompileMessage] = useState('')
+  const [compileDate, setCompileDate] = useState(getBeijingDateStr())
 
   useEffect(() => {
     loadDiaries()
@@ -190,9 +191,10 @@ function DiaryPanel({ onClose }) {
     setIsCompiling(true)
     setCompileMessage('')
     try {
-      const result = await compileDiary()
+      const result = await compileDiary(compileDate)
       if (result.ok) {
         setCompileMessage(result.message)
+        setSelectedMonth(compileDate.slice(0, 7))
         await loadDiaries()
       } else {
         setCompileMessage(result.error || '整理失败')
@@ -348,6 +350,8 @@ function DiaryPanel({ onClose }) {
           is_pinned: true,
           is_resolved: false,
           is_active: true,
+          skipAutoTag: true,
+          skipDuplicateCheck: true,
         })
       }
       closeEditor()
@@ -420,14 +424,24 @@ function DiaryPanel({ onClose }) {
           <h1 className="panel-title">日记</h1>
           <div className="tool-header-actions">
             <span className="panel-subtitle">共 {totalCount} 篇日记</span>
-            <button 
-              className="compile-btn" 
-              onClick={handleCompileDiary}
-              disabled={isCompiling}
-            >
-              <span className="compile-icon">🤖</span>
-              {isCompiling ? '整理中...' : 'AI整理'}
-            </button>
+            <div className="compile-date-group">
+              <input
+                type="date"
+                className="compile-date-input"
+                value={compileDate}
+                onChange={(e) => setCompileDate(e.target.value)}
+                disabled={isCompiling}
+                title="选择要整理的日记日期"
+              />
+              <button 
+                className="compile-btn" 
+                onClick={handleCompileDiary}
+                disabled={isCompiling || !compileDate}
+              >
+                <span className="compile-icon">🤖</span>
+                {isCompiling ? '整理中...' : 'AI整理'}
+              </button>
+            </div>
             <button className="add-tool-btn" onClick={openNewEditor}>
               <PlusIcon />
               写日记

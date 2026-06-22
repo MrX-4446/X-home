@@ -226,11 +226,12 @@ function App() {
       : ''
 
     // 4) 保存 AI 回复并刷新
-    await sendMessageDB({
+    const savedAssistantMessage = await sendMessageDB({
       chat_id: chatId,
       role: 'assistant',
       content: `${aiResult.reply || '（AI 没有返回内容）'}${toolMetadata}`,
     })
+
     await updateChatDB(chatId, {
       preview: userText.substring(0, 30) + (userText.length > 30 ? '...' : ''),
     })
