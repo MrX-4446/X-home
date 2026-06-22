@@ -16,6 +16,7 @@ import {
   createChat as createChatDB,
   updateChat as updateChatDB,
   deleteChat as deleteChatDB,
+  compressChatMemory as compressChatMemoryDB,
   sendMessage as sendMessageDB,
   getMessages,
   chatWithAI,
@@ -271,6 +272,23 @@ function App() {
     }
   }
 
+  const handleCompressChatMemory = async (chatId) => {
+    try {
+      const result = await compressChatMemoryDB(chatId)
+      if (result.ok) {
+        alert(result.message || '压缩成功')
+        await loadChats()
+        if (currentChatId === chatId) {
+          await loadMessages(chatId)
+        }
+      } else {
+        alert(result.error || '压缩失败')
+      }
+    } catch (err) {
+      alert('压缩失败：' + err.message)
+    }
+  }
+
   const handleUpdateChatTitle = async (chatId, newTitle) => {
     console.log('更新标题:', { chatId, newTitle })
     const result = await updateChatDB(chatId, { title: newTitle })
@@ -328,6 +346,7 @@ function App() {
             onSelectChat={setCurrentChatId}
             onCreateChat={createNewChat}
             onDeleteChat={handleDeleteChat}
+            onCompressMemory={handleCompressChatMemory}
             onUpdateChatTitle={handleUpdateChatTitle}
             isOpen={sidebarOpen}
             onClose={() => setSidebarOpen(false)}
@@ -435,7 +454,7 @@ function App() {
   )
 }
 
-function Sidebar({ chats, currentChatId, onSelectChat, onCreateChat, onDeleteChat, onUpdateChatTitle, isOpen, onClose }) {
+function Sidebar({ chats, currentChatId, onSelectChat, onCreateChat, onDeleteChat, onCompressMemory, onUpdateChatTitle, isOpen, onClose }) {
   const [editingChatId, setEditingChatId] = useState(null)
   const [editingTitle, setEditingTitle] = useState('')
   const [contextMenuChatId, setContextMenuChatId] = useState(null)
@@ -613,6 +632,20 @@ function Sidebar({ chats, currentChatId, onSelectChat, onCreateChat, onDeleteCha
               <path d="m15 5 4 4"></path>
             </svg>
             修改标题
+          </button>
+          <button 
+            className="context-menu-item"
+            onClick={() => {
+              onCompressMemory(contextMenuChatId)
+              setContextMenuChatId(null)
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '6px' }}>
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+              <line x1="12" y1="22.08" x2="12" y2="12"></line>
+            </svg>
+            压缩记忆
           </button>
           <button 
             className="context-menu-item delete"

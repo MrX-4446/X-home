@@ -1036,6 +1036,93 @@ const server = http.createServer(async (req, res) => {
         writeStorage('chats', chats)
         return sendJson(res, 200, { ok: true })
       }
+
+      if (req.method === 'POST') {
+        const body = await readBody(req)
+        if (body.action === 'compress') {
+          const chat = chats.find(c => c.id === chatId)
+          if (!chat) {
+            return sendJson(res, 404, { error: '对话不存在' })
+          }
+          if (!chat.messages || chat.messages.length === 0) {
+            return sendJson(res, 200, { ok: true, message: '没有需要压缩的消息' })
+          }
+
+          const keepRecent = parseInt(getSetting('keep_recent_messages') || '10')
+          const forceCompressAll = body.force || false
+          
+          let messagesToCompress, remainingMessages
+          if (forceCompressAll) {
+            messagesToCompress = [...chat.messages]
+            remainingMessages = []
+          } else {
+            messagesToCompress = chat.messages.slice(0, -keepRecent)
+            remainingMessages = chat.messages.slice(-keepRecent)
+          }
+          
+          if (messagesToCompress.length === 0) {
+            return sendJson(res, 200, { ok: true, message: '消息数量不足，无需压缩' })
+          }
+
+          console.log(`[手动记忆压缩] 对话 ${chatId}，${messagesToCompress.length} 条消息待压缩...`)
+          
+          try {
+            const messagesText = messagesToCompress.map(msg => 
+              `${msg.role === 'user' ? '用户' : 'X'}: ${msg.content}`
+            ).join('\n\n')
+
+            const compressPrompt = `请将以下对话内容压缩成一段简短的摘要，保留关键信息和你（作为恋人X）需要记住的关于用户的重要信息：
+
+${messagesText}
+
+请用简洁的语言总结上述对话，突出需要记住的用户信息。`
+
+            const summaryResult = await callAIProvider(null, [
+              { role: 'user', content: compressPrompt }
+            ], { useHelperAI: true, temperature: 0.3, maxTokens: 500 })
+
+            if (summaryResult.reply && summaryResult.reply.trim()) {
+              const mockMemories = readStorage('memories') || []
+              const newMemory = {
+                id: `memory-${Date.now()}`,
+                chat_id: chatId,
+                content: summaryResult.reply.trim(),
+                source: 'compression',
+                tags: ['日常交流'],
+                is_active: true,
+                is_pinned: false,
+                is_resolved: false,
+                importance: 5,
+                valence: 0.5,
+                arousal: 0.3,
+                activation_count: 1,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              }
+              
+              mockMemories.push(newMemory)
+              writeStorage('memories', mockMemories)
+              
+              chat.messages = remainingMessages
+              chat.updated_at = new Date().toISOString()
+              writeStorage('chats', chats)
+              
+              console.log(`[手动记忆压缩] 成功！${messagesToCompress.length} 条消息 -> 1 条记忆`)
+              return sendJson(res, 200, { 
+                ok: true, 
+                message: `成功压缩 ${messagesToCompress.length} 条消息为记忆`,
+                compressedCount: messagesToCompress.length
+              })
+            } else {
+              return sendJson(res, 500, { error: '压缩失败，未获取到摘要内容' })
+            }
+          } catch (err) {
+            console.error('[手动记忆压缩] 失败:', err.message)
+            return sendJson(res, 500, { error: err.message })
+          }
+        }
+        return sendJson(res, 400, { error: '无效的 action' })
+      }
     }
 
     // ===== 消息 API =====

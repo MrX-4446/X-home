@@ -87,6 +87,23 @@ export async function deleteChat(chatId) {
   }
 }
 
+// 压缩聊天记忆
+export async function compressChatMemory(chatId, options = {}) {
+  try {
+    const res = await request(`/api/chats/${chatId}`, {
+      method: 'POST',
+      body: JSON.stringify({ 
+        action: 'compress',
+        force: options.force || true 
+      }),
+    })
+    return res || {}
+  } catch (err) {
+    console.error('压缩聊天记忆失败:', err)
+    return { ok: false, error: err.message }
+  }
+}
+
 // ===== 消息 =====
 
 // 获取某聊天的消息列表
