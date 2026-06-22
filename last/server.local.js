@@ -411,7 +411,7 @@ async function applyMemoryForgettingCurve(memories) {
 async function extractMemoryKeywords(content) {
   try {
     const prompt = `从以下文本中提取3-8个关键实体词（人物、地点、事件、物品等），用英文逗号分隔，不要任何解释：\n\n${content}`
-    const result = await callAIProvider(null, [{ role: 'user', content: prompt }], { useHelperAI: true })
+    const result = await callAIProvider(null, [{ role: 'user', content: prompt }], { useHelperAI: true, purpose: '关键词提取' })
     const rawKeywords = (result.reply || '').trim()
     const keywords = rawKeywords
       .split(/[,，、\n]/)
@@ -809,32 +809,39 @@ async function executeToolCall(toolCall, enabledTools) {
 // ========== AI API 调用 ==========
 
 async function callAIProvider(provider, messages, options = {}) {
-  const { tools = null, temperature, maxTokens, topP, useHelperAI = false } = options
+  const { tools = null, temperature, maxTokens, topP, useHelperAI = false, purpose = '主聊天' } = options
   
-  // ===== 【辅助AI功能】如果指定用辅助AI，优先选择配置的辅助AI
-  let providers
-  const helperId = process.env.HELPER_AI_PROVIDER_ID
-  
-  if (useHelperAI && helperId) {
-    providers = mockAIProviders.filter(p => String(p.id) === String(helperId) && p.enabled)
-    
-    if (!providers || providers.length === 0) {
-      console.log(`[辅助AI] ID ${helperId} 不可用，回退到主AI`)
+  const storedProviders = readStorage('ai-providers') || []
+  const enabledProviders = storedProviders.filter(p => p.enabled)
+  let aiProvider = null
+
+  if (useHelperAI) {
+    const helperId = process.env.HELPER_AI_PROVIDER_ID
+    if (helperId) {
+      aiProvider = enabledProviders.find(p => String(p.id) === String(helperId))
+      if (!aiProvider) {
+        throw new Error(`辅助AI配置不可用：HELPER_AI_PROVIDER_ID=${helperId}`)
+      }
     } else {
-      console.log(`[辅助AI] 使用ID ${helperId} 执行压缩任务，省Token！`)
+      throw new Error('未配置 HELPER_AI_PROVIDER_ID，辅助任务已停止以避免误用主聊天AI')
     }
-  }
-  
-  if (!providers || providers.length === 0) {
-    const storedProviders = readStorage('ai-providers') || []
-    providers = storedProviders.filter(p => p.enabled)
+  } else if (provider) {
+    const providerId = typeof provider === 'object' ? provider.id : provider
+    aiProvider = enabledProviders.find(p => String(p.id) === String(providerId))
+    if (!aiProvider) {
+      throw new Error(`主聊天AI配置不可用或未启用：${providerId}`)
+    }
+  } else {
+    aiProvider = enabledProviders[0]
   }
 
-  if (!providers || providers.length === 0) {
+  if (!aiProvider) {
     throw new Error('没有可用的 AI 提供商')
   }
 
-  const aiProvider = providers[0]
+  console.log(`[AI调用] 类型: ${useHelperAI ? '辅助任务' : purpose}`)
+  console.log(`[AI调用] 使用AI: ${aiProvider.name || aiProvider.id}`)
+  console.log(`[AI调用] 模型: ${aiProvider.model}`)
 
   // 获取 API Key
   let apiKey = process.env.ARK_API_KEY || ''
@@ -935,6 +942,7 @@ ${messagesText}
     { role: 'user', content: compressPrompt }
   ], { 
     useHelperAI: true, // 关键：启用辅助AI，不占主AI的Token！
+    purpose: '记忆压缩',
     temperature: 0.3, 
     maxTokens: 500 
   })
@@ -1092,13 +1100,14 @@ const server = http.createServer(async (req, res) => {
     // ===== AI 对话 API =====
     if (pathname === '/api/chat' && req.method === 'POST') {
       const body = await readBody(req)
-      const { chatId, messages: newMessages } = body
+      const { chatId, messages: newMessages, model: selectedProviderId } = body
 
       if (!chatId || !newMessages || newMessages.length === 0) {
         return sendJson(res, 400, { error: '缺少必要参数' })
       }
 
       const userMessage = newMessages[newMessages.length - 1]
+      console.log(`[AI聊天] 前端选择AI Provider ID: ${selectedProviderId || '未指定，将使用第一个启用AI'}`)
 
       try {
         let baseRules = ''
@@ -1206,7 +1215,7 @@ ${fullSystemPrompt}
           const toolDefinitions = buildToolDefinitions(enabledTools)
           
           // 第一次调用 AI（带工具）
-          const firstResult = await callAIProvider(null, messagesCopy, { tools: toolDefinitions })
+          const firstResult = await callAIProvider(selectedProviderId, messagesCopy, { tools: toolDefinitions, purpose: '主聊天' })
           let finalReply = firstResult.reply
           const toolResults = []
           
@@ -1232,7 +1241,7 @@ ${fullSystemPrompt}
             }
             
             // 第二次调用 AI，使用工具结果生成最终回复
-            const secondResult = await callAIProvider(null, messagesCopy)
+            const secondResult = await callAIProvider(selectedProviderId, messagesCopy, { purpose: '主聊天工具结果总结' })
             finalReply = secondResult.reply
           }
           
@@ -1917,7 +1926,7 @@ ${memoriesText}
 
     const diaryResult = await callAIProvider(null, [
       { role: 'user', content: diaryPrompt }
-    ])
+    ], { useHelperAI: true, purpose: '日记整理', temperature: 0.4, maxTokens: 1200 })
     
     if (diaryResult.reply && diaryResult.reply.trim()) {
       const newDiary = {

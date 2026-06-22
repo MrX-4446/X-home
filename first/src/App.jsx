@@ -226,7 +226,7 @@ function App() {
       : ''
 
     // 4) 保存 AI 回复并刷新
-    const savedAssistantMessage = await sendMessageDB({
+    await sendMessageDB({
       chat_id: chatId,
       role: 'assistant',
       content: `${aiResult.reply || '（AI 没有返回内容）'}${toolMetadata}`,

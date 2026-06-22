@@ -64,19 +64,156 @@ const LoaderIcon = () => (
   </svg>
 )
 
-// 心情选项
-const MOODS = [
-  { emoji: '😊', label: '开心', value: 0.8, arousal: 0.5 },
-  { emoji: '🥰', label: '幸福', value: 0.9, arousal: 0.4 },
-  { emoji: '😌', label: '平静', value: 0.6, arousal: 0.2 },
-  { emoji: '😐', label: '一般', value: 0.5, arousal: 0.3 },
-  { emoji: '😔', label: '难过', value: 0.2, arousal: 0.3 },
-  { emoji: '😤', label: '生气', value: 0.1, arousal: 0.8 },
-  { emoji: '😴', label: '疲惫', value: 0.4, arousal: 0.1 },
-  { emoji: '🤔', label: '思考', value: 0.5, arousal: 0.4 },
-  { emoji: '😍', label: '心动', value: 0.9, arousal: 0.7 },
-  { emoji: '🎉', label: '兴奋', value: 0.9, arousal: 0.9 },
-]
+// 心情图标 - 开心
+const HappyIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" />
+    <path d="M8 15s1.5-2 4-2 4 2 4 2" />
+    <path d="M9 9h.01" />
+    <path d="M15 9h.01" />
+  </svg>
+)
+
+// 心情图标 - 幸福
+const BlissIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" />
+    <path d="M8 14s1.5-2 4-2 4 2 4 2" />
+    <path d="M9 8h.01" />
+    <path d="M15 8h.01" />
+    <path d="M7 6l2 2" />
+    <path d="M15 6l2 2" />
+  </svg>
+)
+
+// 心情图标 - 平静
+const CalmIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" />
+    <line x1="8" y1="14" x2="16" y2="14" />
+    <path d="M9 9h.01" />
+    <path d="M15 9h.01" />
+  </svg>
+)
+
+// 心情图标 - 一般
+const NeutralIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" />
+    <line x1="8" y1="12" x2="16" y2="12" />
+    <path d="M9 9h.01" />
+    <path d="M15 9h.01" />
+  </svg>
+)
+
+// 心情图标 - 难过
+const SadIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" />
+    <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+    <path d="M9 9h.01" />
+    <path d="M15 9h.01" />
+    <path d="M7 10l2-2" />
+    <path d="M15 10l2-2" />
+  </svg>
+)
+
+// 心情图标 - 生气
+const AngryIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" />
+    <path d="M8 14s1.5-2 4-2 4 2 4 2" />
+    <path d="M9 9h.01" />
+    <path d="M15 9h.01" />
+    <path d="M7 7l2 2" />
+    <path d="M15 7l2 2" />
+    <path d="M6 12l2-2" />
+    <path d="M16 12l2-2" />
+  </svg>
+)
+
+// 心情图标 - 疲惫
+const TiredIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" />
+    <line x1="8" y1="14" x2="16" y2="14" />
+    <path d="M10 7l-1 4" />
+    <path d="M14 7l1 4" />
+    <path d="M8 7l0-2" />
+    <path d="M16 7l0-2" />
+  </svg>
+)
+
+// 心情图标 - 思考
+const ThinkingIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" />
+    <line x1="8" y1="14" x2="16" y2="14" />
+    <path d="M9 9h.01" />
+    <path d="M15 9h.01" />
+    <path d="M15 5a2 2 0 0 1 0 4" />
+    <path d="M17 3a2 2 0 0 1 0 4" />
+    <path d="M19 1a2 2 0 0 1 0 4" />
+  </svg>
+)
+
+// 心情图标 - 心动
+const HeartIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" />
+    <path d="M8 14s1.5-2 4-2 4 2 4 2" />
+    <path d="M9 9h.01" />
+    <path d="M15 9h.01" />
+    <path d="M12 17a2 2 0 1 0 0-4 2 2 0 0 0 0 4" />
+  </svg>
+)
+
+// 心情图标 - 兴奋
+const ExcitedIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" />
+    <path d="M8 15s1.5-2 4-2 4 2 4 2" />
+    <path d="M9 8h.01" />
+    <path d="M15 8h.01" />
+    <path d="M7 5l2 2" />
+    <path d="M15 5l2 2" />
+    <path d="M6 18l1-1" />
+    <path d="M17 18l1-1" />
+  </svg>
+)
+
+// 日记图标
+const DiaryIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+    <line x1="8" y1="2" x2="8" y2="6" />
+    <line x1="16" y1="2" x2="16" y2="6" />
+    <line x1="3" y1="10" x2="21" y2="10" />
+    <line x1="8" y1="14" x2="16" y2="14" />
+    <line x1="8" y1="18" x2="16" y2="18" />
+  </svg>
+)
+
+// 书本图标
+const BookIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+    <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+  </svg>
+)
+
+// AI机器人图标
+const BotIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+    <circle cx="12" cy="5" r="3" />
+    <line x1="12" y1="11" x2="12" y2="8" />
+    <path d="M9 16h6" />
+    <path d="M10 19h4" />
+    <path d="M8 2v4" />
+    <path d="M16 2v4" />
+  </svg>
+)
 
 // 获取北京时间日期字符串 YYYY-MM-DD
 function getBeijingDateStr(date = new Date()) {
@@ -240,19 +377,19 @@ function DiaryPanel({ onClose }) {
     return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]))
   }
 
-  // 从日记中提取心情 emoji
+  // 从日记中提取心情图标
   const getMoodFromDiary = (diary) => {
     const valence = diary.valence || 0.5
     const arousal = diary.arousal || 0.3
-    if (diary.source === 'daily_diary') return '📝' // AI自动生成
+    if (diary.source === 'daily_diary') return DiaryIcon // AI自动生成
     // 根据 valence/arousal 匹配心情
-    if (valence > 0.7 && arousal > 0.6) return '🎉'
-    if (valence > 0.7 && arousal > 0.3) return '😊'
-    if (valence > 0.7) return '🥰'
-    if (valence < 0.3 && arousal > 0.6) return '😤'
-    if (valence < 0.3) return '😔'
-    if (arousal < 0.2) return '😴'
-    return '😌'
+    if (valence > 0.7 && arousal > 0.6) return ExcitedIcon
+    if (valence > 0.7 && arousal > 0.3) return HappyIcon
+    if (valence > 0.7) return BlissIcon
+    if (valence < 0.3 && arousal > 0.6) return AngryIcon
+    if (valence < 0.3) return SadIcon
+    if (arousal < 0.2) return TiredIcon
+    return CalmIcon
   }
 
   // 打开新建日记编辑器
@@ -438,7 +575,7 @@ function DiaryPanel({ onClose }) {
                 onClick={handleCompileDiary}
                 disabled={isCompiling || !compileDate}
               >
-                <span className="compile-icon">🤖</span>
+                <span className="compile-icon"><BotIcon /></span>
                 {isCompiling ? '整理中...' : 'AI整理'}
               </button>
             </div>
@@ -485,8 +622,8 @@ function DiaryPanel({ onClose }) {
               </div>
             ) : filteredGroups.length === 0 ? (
               <div className="empty-state">
-                <p style={{ fontSize: '48px', marginBottom: '12px' }}>📖</p>
-                <p>这个月还没有日记</p>
+                  <BookIcon style={{ width: '48px', height: '48px', marginBottom: '12px', color: '#999' }} />
+                  <p>这个月还没有日记</p>
                 <button className="add-tool-btn" onClick={openNewEditor} style={{ marginTop: '16px' }}>
                   <PlusIcon />
                   写下第一篇
@@ -517,7 +654,7 @@ function DiaryPanel({ onClose }) {
                             onClick={() => openDetail(diary)}
                           >
                             <div className="diary-card-header">
-                              <span className="diary-mood">{mood}</span>
+                              <span className="diary-mood"><mood /></span>
                               {isAuto && <span className="diary-auto-badge">AI 整理</span>}
                               <span className="diary-time">
                                 {diary.created_at ? new Date(diary.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : ''}
@@ -580,7 +717,7 @@ function DiaryPanel({ onClose }) {
                       onClick={() => setEditorMood(editorMood?.label === mood.label ? null : mood)}
                       title={mood.label}
                     >
-                      <span className="mood-emoji">{mood.emoji}</span>
+                      <span className="mood-emoji"><mood.icon /></span>
                       <span className="mood-label">{mood.label}</span>
                     </button>
                   ))}
@@ -674,7 +811,7 @@ function DiaryPanel({ onClose }) {
               return (
                 <>
                   <div className="detail-header">
-                    <span className="detail-mood">{mood}</span>
+                    <span className="detail-mood"><mood /></span>
                     <div className="detail-date-info">
                       <h2 className="detail-date">{dateInfo.full}</h2>
                       {selectedDiary.created_at && (
