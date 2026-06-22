@@ -46,6 +46,50 @@ function writeStorage(key, data) {
   fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8')
 }
 
+function generateMessageId(baseTime, index) {
+  return `msg-${baseTime}-${index}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function normalizeChatMessages(chat) {
+  if (!chat || !Array.isArray(chat.messages)) return false
+
+  const usedIds = new Set()
+  let changed = false
+
+  chat.messages = chat.messages.map((message, index) => {
+    const normalized = { ...message }
+
+    if (!normalized.id || usedIds.has(normalized.id)) {
+      const createdAt = normalized.created_at ? Date.parse(normalized.created_at) : NaN
+      const timePart = Number.isFinite(createdAt) ? createdAt : Date.now()
+      let newId = generateMessageId(timePart, index)
+      while (usedIds.has(newId)) {
+        newId = generateMessageId(timePart, index)
+      }
+      normalized.id = newId
+      changed = true
+    }
+
+    if (!normalized.created_at) {
+      normalized.created_at = chat.created_at || new Date().toISOString()
+      changed = true
+    }
+
+    usedIds.add(normalized.id)
+    return normalized
+  })
+
+  return changed
+}
+
+function normalizeChatsMessages(chats) {
+  let changed = false
+  chats.forEach(chat => {
+    if (normalizeChatMessages(chat)) changed = true
+  })
+  return changed
+}
+
 // AI 连接测试函数
 async function testAIProvider(provider) {
   try {
@@ -945,6 +989,9 @@ const server = http.createServer(async (req, res) => {
     // ===== 聊天会话 API =====
     if (pathname === '/api/chats' && req.method === 'GET') {
       const chats = readStorage('chats') || []
+      if (normalizeChatsMessages(chats)) {
+        writeStorage('chats', chats)
+      }
       return sendJson(res, 200, { data: chats })
     }
 
@@ -988,6 +1035,9 @@ const server = http.createServer(async (req, res) => {
       const chatId = url.searchParams.get('chat_id')
       const chats = readStorage('chats') || []
       const chat = chats.find(c => c.id === chatId)
+      if (normalizeChatMessages(chat)) {
+        writeStorage('chats', chats)
+      }
       return sendJson(res, 200, { data: chat?.messages || [] })
     }
 
@@ -995,7 +1045,18 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req)
       const chats = readStorage('chats') || []
       const chat = chats.find(c => c.id === body.chat_id)
-      const newMsg = { ...body, id: `msg-${Date.now()}`, created_at: new Date().toISOString() }
+      if (normalizeChatMessages(chat)) {
+        writeStorage('chats', chats)
+      }
+
+      const createMessageId = () => `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      let messageId = createMessageId()
+      const existingIds = new Set((chat?.messages || []).map(m => m.id))
+      while (existingIds.has(messageId)) {
+        messageId = createMessageId()
+      }
+
+      const newMsg = { ...body, id: messageId, created_at: new Date().toISOString() }
       if (chat) {
         chat.messages = chat.messages || []
         chat.messages.push(newMsg)
@@ -1989,6 +2050,12 @@ function setupDailyDiaryTask() {
 }
 
 server.listen(PORT, '0.0.0.0', () => {
+  const chats = readStorage('chats') || []
+  if (normalizeChatsMessages(chats)) {
+    writeStorage('chats', chats)
+    console.log('[初始化修复] 已修复旧对话中缺失/重复的消息ID')
+  }
+
   console.log(`\n========================================`)
   console.log(`本地开发服务器已启动`)
   console.log(`地址: http://localhost:${PORT}`)
