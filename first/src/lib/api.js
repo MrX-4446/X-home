@@ -1,9 +1,9 @@
 // =============================================================
 // 前端 API 客户端
-// 作用：统一访问后端服务（D:\X\last 部署的 Netlify Functions）
+// 作用：统一访问后端服务（d:\X\last 部署的 Node.js 服务）
 // 配置：通过环境变量 VITE_API_BASE 指定后端域名
 //   开发环境示例：VITE_API_BASE=http://localhost:8888
-//   生产环境示例：VITE_API_BASE=https://chat-backend-xxxx.netlify.app
+//   生产环境示例：VITE_API_BASE=https://your-domain.com
 // =============================================================
 
 export const API_BASE = import.meta.env.VITE_API_BASE || ''

@@ -1,11 +1,11 @@
 {
   "name": "chat-backend",
   "version": "1.0.0",
-  "description": "Backend (Netlify Functions) for chat app: AI proxy + Supabase data access",
+  "description": "Backend for chat app: AI proxy + memory management",
   "private": true,
   "scripts": {
-    "dev": "netlify dev",
-    "build": "echo 'no build for backend'"
+    "start": "node server.local.js",
+    "dev": "node server.local.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.1",

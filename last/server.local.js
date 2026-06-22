@@ -1545,6 +1545,33 @@ ${messagesText}
       return sendJson(res, 200, { ok: true })
     }
 
+    // ===== 代码执行 API =====
+    if (pathname === '/api/execute-code' && req.method === 'POST') {
+      const body = await readBody(req)
+      const { code } = body
+      const result = await executeCode(code)
+      return sendJson(res, 200, result)
+    }
+
+    // ===== 消息删除 API =====
+    if (pathname.match(/\/api\/messages\/.+/) && req.method === 'DELETE') {
+      const messageId = pathname.split('/')[3]
+      const chats = readStorage('chats') || []
+      let deleted = false
+      for (const chat of chats) {
+        if (chat.messages) {
+          const index = chat.messages.findIndex(m => m.id === messageId)
+          if (index !== -1) {
+            chat.messages.splice(index, 1)
+            chat.updated_at = new Date().toISOString()
+            deleted = true
+          }
+        }
+      }
+      writeStorage('chats', chats)
+      return sendJson(res, 200, { ok: deleted })
+    }
+
     return sendJson(res, 404, { error: 'Not found' })
   } catch (err) {
     console.error('Error:', err)
