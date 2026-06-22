@@ -393,6 +393,31 @@ export async function touchMemory(memoryId) {
 }
 
 // 统一 API 对象导出
+// ===== 日记 API =====
+
+export async function compileDiary(date = null) {
+  try {
+    const res = await request('/api/diary/compile', {
+      method: 'POST',
+      body: JSON.stringify({ date }),
+    })
+    return res
+  } catch (err) {
+    console.error('整理日记失败:', err)
+    return { ok: false, error: err.message }
+  }
+}
+
+export async function getDiaryStatus() {
+  try {
+    const res = await request('/api/diary/status')
+    return res?.data || {}
+  } catch (err) {
+    console.error('获取日记状态失败:', err)
+    return {}
+  }
+}
+
 export const api = {
   get: (path) => request(path),
   post: (path, body) => request(path, { method: 'POST', body: JSON.stringify(body) }),

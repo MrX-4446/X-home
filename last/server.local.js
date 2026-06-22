@@ -1,8 +1,6 @@
 // =============================================================
 // 本地开发服务器
-// 支持两种模式：
-// 1. Mock 模式：使用本地 JSON 文件存储（当 SUPABASE_URL 包含 localhost 时）
-// 2. Supabase 模式：连接真实 Supabase 数据库
+// 使用本地 JSON 文件存储
 // =============================================================
 
 require('dotenv').config()
@@ -11,21 +9,9 @@ const fs = require('fs')
 const path = require('path')
 
 const PORT = process.env.PORT || 8888
-const SUPABASE_URL = process.env.SUPABASE_URL || ''
-const USE_MOCK = SUPABASE_URL.includes('localhost') || SUPABASE_URL.includes('mock')
 
-// Supabase 客户端（仅非 mock 模式使用）
-let supabase = null
-if (!USE_MOCK && SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
-  const { createClient } = require('@supabase/supabase-js')
-  supabase = createClient(SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
-    auth: { persistSession: false },
-  })
-}
-
-// Mock 存储目录
 const STORAGE_DIR = path.join(__dirname, '.local-storage')
-if (USE_MOCK && !fs.existsSync(STORAGE_DIR)) {
+if (!fs.existsSync(STORAGE_DIR)) {
   fs.mkdirSync(STORAGE_DIR, { recursive: true })
 }
 
@@ -203,219 +189,32 @@ function readBody(req) {
   })
 }
 
-// ========== Supabase 模式 API ==========
-
-async function supabaseGetChats() {
-  const { data, error } = await supabase
-    .from('chats')
-    .select('*, messages(*)')
-    .order('updated_at', { ascending: false })
-  if (error) throw error
-  return data || []
-}
-
-async function supabaseCreateChat(body) {
-  const { data, error } = await supabase
-    .from('chats')
-    .insert([body])
-    .select()
-  if (error) throw error
-  return data?.[0]
-}
-
-async function supabaseUpdateChat(chatId, updates) {
-  const { data, error } = await supabase
-    .from('chats')
-    .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq('id', chatId)
-    .select()
-  if (error) throw error
-  return data?.[0]
-}
-
-async function supabaseDeleteChat(chatId) {
-  const { error } = await supabase.from('chats').delete().eq('id', chatId)
-  if (error) throw error
-}
-
-async function supabaseGetMessages(chatId) {
-  const { data, error } = await supabase
-    .from('messages')
-    .select('*')
-    .eq('chat_id', chatId)
-    .order('created_at', { ascending: true })
-  if (error) throw error
-  return data || []
-}
-
-async function supabaseCreateMessage(body) {
-  const { data, error } = await supabase
-    .from('messages')
-    .insert([body])
-    .select()
-  if (error) throw error
-  return data?.[0]
-}
-
-async function supabaseGetAIProviders() {
-  const { data, error } = await supabase
-    .from('ai_providers')
-    .select('id,name,provider_type,endpoint,model,enabled,created_at,updated_at')
-    .order('created_at', { ascending: false })
-  if (error) throw error
-  return (data || []).map(p => ({ ...p, hasApiKey: true, apiKey: '******' }))
-}
-
-async function supabaseCreateAIProvider(input) {
-  // 本地开发：明文存储 API Key（只在本地使用，安全风险低）
-  const { data, error } = await supabase
-    .from('ai_providers')
-    .insert([{
-      name: input.name,
-      provider_type: input.providerType || 'openai_compatible',
-      endpoint: input.endpoint,
-      model: input.model,
-      enabled: input.enabled ?? true,
-      api_key: input.apiKey || '', // 明文存储，方便本地测试
-    }])
-    .select('id,name,provider_type,endpoint,model,enabled,api_key,created_at,updated_at')
-    .single()
-  if (error) throw error
-  return { ...data, hasApiKey: Boolean(data.api_key), apiKey: '******' }
-}
-
-async function supabaseUpdateAIProvider(id, updates) {
-  const { data, error } = await supabase
-    .from('ai_providers')
-    .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .select('id,name,provider_type,endpoint,model,enabled,created_at,updated_at')
-  if (error) throw error
-  return { ...data?.[0], hasApiKey: true, apiKey: '******' }
-}
-
-async function supabaseDeleteAIProvider(id) {
-  const { error } = await supabase.from('ai_providers').delete().eq('id', id)
-  if (error) throw error
-}
-
 // ========== 设置和记忆相关函数 ==========
 
-async function supabaseGetSetting(key) {
-  // MOCK 模式下返回默认值
-  if (USE_MOCK) {
-    const defaults = {
-      temperature: '0.7',
-      max_tokens: '4096',
-      top_p: '0.9',
-      memory_threshold: '3000',
-      keep_recent_messages: '10',
-      memory_decay_rate: '0.01',
-      system_prompt: '你是一个智能助手，乐于助人，回答准确。',
-    }
-    return defaults[key] || null
+function getSetting(key) {
+  const defaults = {
+    temperature: '0.7',
+    max_tokens: '4096',
+    top_p: '0.9',
+    memory_threshold: '3000',
+    keep_recent_messages: '10',
+    memory_decay_rate: '0.01',
+    system_prompt: '你是一个智能助手，乐于助人，回答准确。',
   }
-  
-  const { data, error } = await supabase
-    .from('settings')
-    .select('value')
-    .eq('key', key)
-    .single()
-  if (error && error.code !== 'PGRST116') throw error
-  return data?.value || null
-}
-
-async function supabaseGetMemories(chatId, filters = {}) {
-  let query = supabase
-    .from('memories')
-    .select('*')
-
-  if (chatId) {
-    query = query.eq('chat_id', chatId)
-  }
-  if (filters.is_active !== undefined) {
-    query = query.eq('is_active', filters.is_active)
-  }
-  if (filters.is_pinned !== undefined) {
-    query = query.eq('is_pinned', filters.is_pinned)
-  }
-  if (filters.is_resolved !== undefined) {
-    query = query.eq('is_resolved', filters.is_resolved)
-  }
-  if (filters.source) {
-    query = query.eq('source', filters.source)
-  }
-
-  query = query.order('created_at', { ascending: false })
-
-  const { data, error } = await query
-  if (error) throw error
-  return data || []
-}
-
-async function supabaseGetMemoryById(id) {
-  const { data, error } = await supabase
-    .from('memories')
-    .select('*')
-    .eq('id', id)
-    .single()
-  if (error) throw error
-  return data || null
-}
-
-async function supabaseCreateMemory(body) {
-  const { data, error } = await supabase
-    .from('memories')
-    .insert([body])
-    .select()
-  if (error) throw error
-  return data?.[0]
-}
-
-async function supabaseUpdateMemory(id, updates) {
-  const { data, error } = await supabase
-    .from('memories')
-    .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .select()
-  if (error) throw error
-  return data?.[0]
-}
-
-async function supabaseDeleteMemory(id) {
-  const { error } = await supabase.from('memories').delete().eq('id', id)
-  if (error) throw error
-}
-
-async function supabaseTouchMemory(id) {
-  const { data, error } = await supabase
-    .from('memories')
-    .update({
-      activation_count: supabase.raw('activation_count + 1'),
-      last_activated_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', id)
-    .select()
-  if (error) throw error
-  return data?.[0]
+  return defaults[key] || null
 }
 
 // ========== 情感分析自动打标 ==========
 async function analyzeEmotion(content) {
   try {
-    const { data: providers } = await supabase
-      .from('ai_providers')
-      .select('*')
-      .eq('enabled', true)
-      .order('created_at', { ascending: false })
-      .limit(1)
+    const providers = readStorage('ai_providers') || []
+    const enabledProviders = providers.filter(p => p.enabled).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
 
-    if (!providers || providers.length === 0) {
+    if (!enabledProviders || enabledProviders.length === 0) {
       return { valence: 0.5, arousal: 0.3, importance: 5 }
     }
 
-    const aiProvider = providers[0]
+    const aiProvider = enabledProviders[0]
 
     const prompt = `请分析以下文本的情感特征，并返回 JSON 格式结果：
 {
@@ -550,16 +349,11 @@ async function applyMemoryForgettingCurve(memories) {
       const newImportance = Math.max(MIN_IMPORTANCE, Math.round(mem.importance * (1 - FORGETTING_RATE)))
       if (newImportance < mem.importance) {
         mem.importance = newImportance
-        if (!USE_MOCK) {
-          await supabaseUpdateMemory(mem.id, { importance: newImportance })
-        } else {
-          // MOCK模式下更新文件
-          const allMemories = readStorage('memories') || []
-          const idx = allMemories.findIndex(m => m.id === mem.id)
-          if (idx !== -1) {
-            allMemories[idx].importance = newImportance
-            writeStorage('memories', allMemories)
-          }
+        const allMemories = readStorage('memories') || []
+        const idx = allMemories.findIndex(m => m.id === mem.id)
+        if (idx !== -1) {
+          allMemories[idx].importance = newImportance
+          writeStorage('memories', allMemories)
         }
         console.log(`[智能遗忘] ${mem.id.substring(0, 12)} 重要性降级 → ${newImportance}`)
         updatedCount++
@@ -659,25 +453,16 @@ async function surfaceMemoriesEnhanced(chatId, userMessage = '', limit = 10) {
   const relatedChatIds = getRelatedChatIds(chatId)
   let allMemories = []
 
+  const allStoredMemories = readStorage('memories') || []
   for (const cid of relatedChatIds) {
-    const mems = await supabaseGetMemories(cid, { is_active: true })
+    const mems = allStoredMemories.filter(m => m.chat_id === cid && m.is_active)
     allMemories.push(...mems)
   }
 
-  // 【修复】同时检索全局记忆（chat_id 为 null 的日记等），日记在所有会话中都可见
-  if (USE_MOCK) {
-    const globalMems = (readStorage('memories') || []).filter(m => !m.chat_id && m.is_active)
-    allMemories.push(...globalMems)
-  } else {
-    const { data: globalMems } = await supabase
-      .from('memories')
-      .select('*')
-      .is('chat_id', null)
-      .eq('is_active', true)
-    if (globalMems) allMemories.push(...globalMems)
-  }
+  const globalMems = (readStorage('memories') || []).filter(m => !m.chat_id && m.is_active)
+  allMemories.push(...globalMems)
 
-  const decayRate = parseFloat(await supabaseGetSetting('memory_decay_rate') || '0.01')
+  const decayRate = parseFloat(getSetting('memory_decay_rate') || '0.01')
   const now = new Date()
 
   // 混合打分：语义相似度 + 规则打分
@@ -724,17 +509,13 @@ async function surfaceMemoriesEnhanced(chatId, userMessage = '', limit = 10) {
 
 // ========== 主动浮现机制 ==========
 async function surfaceMemories(chatId, limit = 10) {
-  const memories = await supabaseGetMemories(chatId, { is_active: true })
+  const allStoredMemories = readStorage('memories') || []
+  const memories = allStoredMemories.filter(m => m.chat_id === chatId && m.is_active)
 
-  // 【修复】同时检索全局记忆（chat_id 为 null 的日记等）
-  const { data: globalMems } = await supabase
-    .from('memories')
-    .select('*')
-    .is('chat_id', null)
-    .eq('is_active', true)
-  if (globalMems) memories.push(...globalMems)
+  const globalMems = allStoredMemories.filter(m => !m.chat_id && m.is_active)
+  memories.push(...globalMems)
 
-  const decayRate = parseFloat(await supabaseGetSetting('memory_decay_rate') || '0.01')
+  const decayRate = parseFloat(getSetting('memory_decay_rate') || '0.01')
 
   const scored = memories.map(mem => {
     const now = new Date()
@@ -991,18 +772,7 @@ async function callAIProvider(provider, messages, options = {}) {
   const helperId = process.env.HELPER_AI_PROVIDER_ID
   
   if (useHelperAI && helperId) {
-    // 优先用辅助AI（专门做压缩、摘要等脏活）
-    if (USE_MOCK) {
-      providers = mockAIProviders.filter(p => String(p.id) === String(helperId) && p.enabled)
-    } else {
-      const { data } = await supabase
-        .from('ai_providers')
-        .select('*')
-        .eq('enabled', true)
-        .eq('id', helperId)
-        .limit(1)
-      providers = data
-    }
+    providers = mockAIProviders.filter(p => String(p.id) === String(helperId) && p.enabled)
     
     if (!providers || providers.length === 0) {
       console.log(`[辅助AI] ID ${helperId} 不可用，回退到主AI`)
@@ -1011,19 +781,9 @@ async function callAIProvider(provider, messages, options = {}) {
     }
   }
   
-  // 还是没找到，用默认主AI
   if (!providers || providers.length === 0) {
-    if (USE_MOCK) {
-      providers = mockAIProviders.filter(p => p.enabled)
-    } else {
-      const { data } = await supabase
-        .from('ai_providers')
-        .select('*')
-        .eq('enabled', true)
-        .order('created_at', { ascending: false })
-        .limit(1)
-      providers = data
-    }
+    const storedProviders = readStorage('ai_providers') || []
+    providers = storedProviders.filter(p => p.enabled)
   }
 
   if (!providers || providers.length === 0) {
@@ -1061,9 +821,9 @@ async function callAIProvider(provider, messages, options = {}) {
   const requestBody = {
     model: aiProvider.model,
     messages: messages,
-    temperature: temperature ?? parseFloat(await supabaseGetSetting('temperature') || '0.7'),
-    max_tokens: maxTokens ?? parseInt(await supabaseGetSetting('max_tokens') || '4096'),
-    top_p: topP ?? parseFloat(await supabaseGetSetting('top_p') || '0.9'),
+    temperature: temperature ?? parseFloat(getSetting('temperature') || '0.7'),
+    max_tokens: maxTokens ?? parseInt(getSetting('max_tokens') || '4096'),
+    top_p: topP ?? parseFloat(getSetting('top_p') || '0.9'),
   }
 
   if (tools && tools.length > 0) {
@@ -1110,14 +870,6 @@ function estimateMessagesTokens(messages) {
 
 // ========== 记忆压缩 ==========
 
-async function supabaseDeleteMessages(messageIds) {
-  const { error } = await supabase
-    .from('messages')
-    .delete()
-    .in('id', messageIds)
-  if (error) throw error
-}
-
 async function compressMemory(chatId, messagesToCompress) {
   if (messagesToCompress.length === 0) return
 
@@ -1148,14 +900,30 @@ ${messagesText}
   if (content) {
     const emotion = await analyzeEmotion(content)
 
-    await supabaseCreateMemory({
+    const memories = readStorage('memories') || []
+    memories.push({
+      id: `mem-${Date.now()}`,
       chat_id: chatId,
       content: content,
       source: 'compression',
-      ...emotion,
+      is_active: true,
+      is_pinned: false,
+      is_resolved: false,
+      importance: emotion.importance || 5,
+      activation_count: 0,
+      valence: emotion.valence || 0.5,
+      arousal: emotion.arousal || 0.3,
+      tags: [],
+      date: new Date().toISOString().split('T')[0],
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     })
+    writeStorage('memories', memories)
 
-    await supabaseDeleteMessages(messagesToCompress.map(m => m.id))
+    const allMessages = readStorage('messages') || []
+    const messageIdsToDelete = new Set(messagesToCompress.map(m => m.id))
+    const filteredMessages = allMessages.filter(m => !messageIdsToDelete.has(m.id))
+    writeStorage('messages', filteredMessages)
 
     console.log(`记忆压缩完成：${messagesToCompress.length} 条消息 -> 1 条摘要`)
   }
@@ -1171,59 +939,46 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`)
   const pathname = url.pathname
 
-  console.log(`[${USE_MOCK ? 'MOCK' : 'SUPABASE'}] ${req.method} ${pathname}`)
+  console.log(`[LOCAL] ${req.method} ${pathname}`)
 
   try {
     // ===== 聊天会话 API =====
     if (pathname === '/api/chats' && req.method === 'GET') {
-      if (USE_MOCK) {
-        return sendJson(res, 200, { data: mockChats })
-      }
-      const chats = await supabaseGetChats()
+      const chats = readStorage('chats') || []
       return sendJson(res, 200, { data: chats })
     }
 
     if (pathname === '/api/chats' && req.method === 'POST') {
       const body = await readBody(req)
-      if (USE_MOCK) {
-        const newChat = {
-          ...body,
-          id: `chat-${Date.now()}`,
-          messages: [],
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }
-        mockChats.unshift(newChat)
-        writeStorage('chats', mockChats)
-        return sendJson(res, 200, { data: newChat })
+      const chats = readStorage('chats') || []
+      const newChat = {
+        ...body,
+        id: `chat-${Date.now()}`,
+        messages: [],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       }
-      const chat = await supabaseCreateChat(body)
-      return sendJson(res, 200, { data: chat })
+      chats.unshift(newChat)
+      writeStorage('chats', chats)
+      return sendJson(res, 200, { data: newChat })
     }
 
     if (pathname.match(/\/api\/chats\/.+/)) {
       const chatId = pathname.split('/')[3]
+      const chats = readStorage('chats') || []
       
       if (req.method === 'PATCH') {
         const updates = await readBody(req)
-        if (USE_MOCK) {
-          const chat = mockChats.find(c => c.id === chatId)
-          if (chat) Object.assign(chat, updates, { updated_at: new Date().toISOString() })
-          writeStorage('chats', mockChats)
-          return sendJson(res, 200, { data: { id: chatId, ...updates } })
-        }
-        const chat = await supabaseUpdateChat(chatId, updates)
-        return sendJson(res, 200, { data: chat })
+        const chat = chats.find(c => c.id === chatId)
+        if (chat) Object.assign(chat, updates, { updated_at: new Date().toISOString() })
+        writeStorage('chats', chats)
+        return sendJson(res, 200, { data: { id: chatId, ...updates } })
       }
 
       if (req.method === 'DELETE') {
-        if (USE_MOCK) {
-          const index = mockChats.findIndex(c => c.id === chatId)
-          if (index !== -1) mockChats.splice(index, 1)
-          writeStorage('chats', mockChats)
-          return sendJson(res, 200, { ok: true })
-        }
-        await supabaseDeleteChat(chatId)
+        const index = chats.findIndex(c => c.id === chatId)
+        if (index !== -1) chats.splice(index, 1)
+        writeStorage('chats', chats)
         return sendJson(res, 200, { ok: true })
       }
     }
@@ -1231,71 +986,45 @@ const server = http.createServer(async (req, res) => {
     // ===== 消息 API =====
     if (pathname === '/api/messages' && req.method === 'GET') {
       const chatId = url.searchParams.get('chat_id')
-      if (USE_MOCK) {
-        const chat = mockChats.find(c => c.id === chatId)
-        return sendJson(res, 200, { data: chat?.messages || [] })
-      }
-      const messages = await supabaseGetMessages(chatId)
-      return sendJson(res, 200, { data: messages })
+      const chats = readStorage('chats') || []
+      const chat = chats.find(c => c.id === chatId)
+      return sendJson(res, 200, { data: chat?.messages || [] })
     }
 
     if (pathname === '/api/messages' && req.method === 'POST') {
       const body = await readBody(req)
-      if (USE_MOCK) {
-        const chat = mockChats.find(c => c.id === body.chat_id)
-        const newMsg = { ...body, id: `msg-${Date.now()}`, created_at: new Date().toISOString() }
-        if (chat) {
-          chat.messages = chat.messages || []
-          chat.messages.push(newMsg)
-          chat.updated_at = new Date().toISOString()
-        }
-        writeStorage('chats', mockChats)
-        return sendJson(res, 200, { data: newMsg })
+      const chats = readStorage('chats') || []
+      const chat = chats.find(c => c.id === body.chat_id)
+      const newMsg = { ...body, id: `msg-${Date.now()}`, created_at: new Date().toISOString() }
+      if (chat) {
+        chat.messages = chat.messages || []
+        chat.messages.push(newMsg)
+        chat.updated_at = new Date().toISOString()
       }
-      const msg = await supabaseCreateMessage(body)
-      return sendJson(res, 200, { data: msg })
+      writeStorage('chats', chats)
+      return sendJson(res, 200, { data: newMsg })
     }
 
     // ===== 设置 API =====
     if (pathname === '/api/settings' && req.method === 'GET') {
-      if (USE_MOCK) {
-        // 从本地 JSON 文件读取设置，如果没有则返回空
-        const savedSettings = readStorage('settings') || {}
-        const mockSettings = {
-          chat_name: savedSettings.chat_name || '',
-          system_prompt: savedSettings.system_prompt || '',
-          temperature: savedSettings.temperature || '0.7',
-          max_tokens: savedSettings.max_tokens || '4096',
-          top_p: savedSettings.top_p || '0.9',
-          memory_threshold: savedSettings.memory_threshold || '3000',
-          keep_recent_messages: savedSettings.keep_recent_messages || '10',
-        }
-        return sendJson(res, 200, { data: mockSettings })
+      const savedSettings = readStorage('settings') || {}
+      const settings = {
+        chat_name: savedSettings.chat_name || '',
+        system_prompt: savedSettings.system_prompt || '',
+        temperature: savedSettings.temperature || '0.7',
+        max_tokens: savedSettings.max_tokens || '4096',
+        top_p: savedSettings.top_p || '0.9',
+        memory_threshold: savedSettings.memory_threshold || '3000',
+        keep_recent_messages: savedSettings.keep_recent_messages || '10',
       }
-      const { data, error } = await supabase
-        .from('settings')
-        .select('key, value')
-      if (error) throw error
-      const settings = {}
-      data.forEach(s => settings[s.key] = s.value)
       return sendJson(res, 200, { data: settings })
     }
 
     if (pathname === '/api/settings' && req.method === 'PUT') {
       const updates = await readBody(req)
-      if (USE_MOCK) {
-        // MOCK 模式下，保存设置到本地 JSON 文件
-        const currentSettings = readStorage('settings') || {}
-        const newSettings = { ...currentSettings, ...updates }
-        writeStorage('settings', newSettings)
-        return sendJson(res, 200, { ok: true })
-      }
-      for (const [key, value] of Object.entries(updates)) {
-        const { error } = await supabase
-          .from('settings')
-          .upsert({ key, value }, { onConflict: 'key' })
-        if (error) throw error
-      }
+      const currentSettings = readStorage('settings') || {}
+      const newSettings = { ...currentSettings, ...updates }
+      writeStorage('settings', newSettings)
       return sendJson(res, 200, { ok: true })
     }
 
@@ -1311,17 +1040,14 @@ const server = http.createServer(async (req, res) => {
       const userMessage = newMessages[newMessages.length - 1]
 
       try {
-        // MOCK 模式下也调用真实 AI（因为 AI 测试已成功）
-        if (USE_MOCK) {
-          // 加载底层规则文件（所有 AI 必须遵守）
-          let baseRules = ''
-          try {
-            baseRules = fs.readFileSync(path.join(__dirname, 'base-rules.md'), 'utf-8')
-          } catch (err) {
-            console.warn('[BASE-RULES] 底层规则文件读取失败:', err.message)
-          }
+        let baseRules = ''
+        try {
+          baseRules = fs.readFileSync(path.join(__dirname, 'base-rules.md'), 'utf-8')
+        } catch (err) {
+          console.warn('[BASE-RULES] 底层规则文件读取失败:', err.message)
+        }
 
-          const userSystemPrompt = await supabaseGetSetting('system_prompt') || ''
+        const userSystemPrompt = getSetting('system_prompt') || ''
           
           // ========== 【新增】加载并浮现记忆 ==========
           const allMemories = readStorage('memories') || []
@@ -1449,15 +1175,13 @@ ${fullSystemPrompt}
             finalReply = secondResult.reply
           }
           
-          // ========== MOCK 模式下的记忆压缩 ==========
-          const chat = mockChats.find(c => c.id === chatId)
+          const chats = readStorage('chats') || []
+          const chat = chats.find(c => c.id === chatId)
           if (chat && chat.messages) {
             const allMessages = chat.messages
             const messageCount = allMessages.length
             
-            // 从设置面板读取压缩参数
-            // 触发阈值 = 保留条数 × 2，超过就压缩，避免消息无限堆积
-            const keepRecent = parseInt(await supabaseGetSetting('keep_recent_messages') || '10')
+            const keepRecent = parseInt(getSetting('keep_recent_messages') || '10')
             const compressThreshold = keepRecent * 2
             
             // 消息数超过阈值就压缩（注意：这里是用户消息刚保存、AI 回复前的时刻，
@@ -1523,212 +1247,6 @@ ${messagesText}
           }
           
           return sendJson(res, 200, { reply: finalReply, toolResults: toolResults })
-        }
-        // 步骤一：保存用户消息到数据库
-        const savedUserMsg = await supabaseCreateMessage({
-          chat_id: chatId,
-          role: 'user',
-          content: userMessage.content,
-        })
-
-        // 步骤二：加载当前会话的历史消息
-        const historyMessages = await supabaseGetMessages(chatId)
-
-        // 步骤二.5：检查并触发记忆压缩
-        const memoryThreshold = parseInt(await supabaseGetSetting('memory_threshold') || '3000')
-        const keepRecent = parseInt(await supabaseGetSetting('keep_recent_messages') || '10')
-        
-        // 估算当前历史消息的 token 数
-        const currentTokens = estimateMessagesTokens(historyMessages)
-        
-        // 如果 token 数超过阈值，触发压缩
-        if (currentTokens > memoryThreshold && historyMessages.length > keepRecent * 2) {
-          // 计算需要压缩的消息数量（保留最近 keepRecent*2 条）
-          const messagesToCompress = historyMessages.slice(0, -(keepRecent * 2))
-          
-          // 执行压缩（异步执行，不阻塞主流程）
-          compressMemory(chatId, messagesToCompress).catch(err => {
-            console.error('记忆压缩失败:', err)
-          })
-          
-          // 重新加载消息（压缩后的消息列表）
-          await new Promise(resolve => setTimeout(resolve, 100))  // 等待压缩完成
-          historyMessages = await supabaseGetMessages(chatId)
-        }
-
-        // 步骤三：加载记忆（使用混合检索机制：规则打分 + 语义相似度）
-        // 传入用户消息，让语义相关的记忆优先浮现
-        const surfacedMemories = await surfaceMemoriesEnhanced(chatId, userMessage.content, 5)
-        const memorySummary = surfacedMemories.map(m => m.content).join('\n\n')
-        
-        // 打印检索日志，方便调试
-        if (surfacedMemories.length > 0) {
-          console.log(`[记忆检索] 找到 ${surfacedMemories.length} 条相关记忆`)
-          surfacedMemories.forEach((mem, idx) => {
-            console.log(`  [${idx+1}] 分数:${mem.score.toFixed(2)} (规则:${mem.ruleScore?.toFixed(2)} 语义:${mem.semanticScore?.toFixed(2)}) - ${mem.content.substring(0, 50)}...`)
-          })
-        }
-
-        // 步骤四：组装上下文
-        // 加载底层规则文件（所有 AI 必须遵守）
-        let baseRules = ''
-        try {
-          baseRules = fs.readFileSync(path.join(__dirname, 'base-rules.md'), 'utf-8')
-        } catch (err) {
-          console.warn('[BASE-RULES] 底层规则文件读取失败:', err.message)
-        }
-
-        const userSystemPrompt = await supabaseGetSetting('system_prompt') || '你是一个智能助手，乐于助人，回答准确。'
-        const baseSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}` : userSystemPrompt
-
-        const toolsInfo = `你是一个具备工具使用能力的智能助手。当遇到需要查询信息、计算或执行操作的问题时，你可以调用以下工具：
-
-【本地应用工具】（直接打开手机本地App，无需消耗云端API）：
-1. 天气查询 - 查询城市天气
-   调用格式：{"tool":"天气查询","params":{"city":"城市名称"}}
-   使用场景：查询天气状况，会打开手机天气应用
-
-2. 翻译 - 文本翻译
-   调用格式：{"tool":"翻译","params":{"text":"要翻译的文本","target":"目标语言"}}
-   使用场景：多语言翻译，会打开手机翻译应用，目标语言如：英语、日语、韩语等
-
-3. 日程管理 - 管理日历和日程
-   调用格式：{"tool":"日程管理","params":{"date":"日期"}}
-   使用场景：查看或添加日程，会打开手机日历应用
-
-4. 文件处理 - 读取和处理文档文件
-   调用格式：{"tool":"文件处理","params":{"path":"文件路径"}}
-   使用场景：打开文件，会调用手机文件管理应用
-
-5. 地图导航 - 打开地图导航到指定地点
-   调用格式：{"tool":"地图导航","params":{"location":"地点名称"}}
-   使用场景：导航到目的地，会打开手机地图应用
-
-【云端工具】（需要调用云端API，会产生成本）：
-6. 网页搜索 - 搜索互联网获取实时信息
-   调用格式：{"tool":"网页搜索","params":{"query":"搜索关键词"}}
-   使用场景：需要最新信息、新闻、百科知识等
-
-7. 股票行情 - 查询实时股票数据
-   调用格式：{"tool":"股票行情","params":{"query":"股票代码或名称"}}
-   使用场景：查询股票价格和行情
-
-8. 知识图谱 - 查询百科知识
-   调用格式：{"tool":"知识图谱","params":{"query":"查询内容"}}
-   使用场景：查询百科知识、概念解释等
-
-【本地工具】（本地执行，无云端成本）：
-9. 计算器 - 执行数学计算
-   调用格式：{"tool":"计算器","params":{"expression":"数学表达式"}}
-   使用场景：加减乘除、平方、开方等计算
-
-10. 代码执行 - 执行Python代码
-    调用格式：{"tool":"代码执行","params":{"code":"Python代码"}}
-    使用场景：复杂计算、数据处理、统计分析等
-
-工具调用规则：
-- 优先使用【本地应用工具】和【本地工具】，减少云端API调用成本
-- 在需要使用工具时，直接输出 JSON 格式的工具调用指令
-- 可以连续调用多个工具，用换行分隔
-- 工具执行完成后，我会将结果返回给你，你再用自然语言总结给用户
-- 如果不需要工具，可以直接回答用户问题，不需要调用工具
-
-示例：
-用户：今天北京天气怎么样？
-你：{"tool":"天气查询","params":{"city":"北京"}}
-
-用户：计算 2 的 10 次方
-你：{"tool":"计算器","params":{"expression":"2 ** 10"}}
-
-用户：导航到天安门
-你：{"tool":"地图导航","params":{"location":"北京天安门"}}
-
-用户：搜索最新的AI新闻
-你：{"tool":"网页搜索","params":{"query":"2026年AI最新新闻"}}`
-
-        const systemPrompt = `${baseSystemPrompt}\n\n${toolsInfo}`
-
-        // 获取最近的消息
-        const recentMessages = historyMessages.slice(-keepRecent * 2)  // 每轮对话包含 user + assistant
-
-        // 构建完整的消息数组
-        const fullMessages = []
-
-        // 1. 系统提示词
-        if (systemPrompt) {
-          fullMessages.push({ role: 'system', content: systemPrompt })
-        }
-
-        // 2. 记忆摘要（如果有）
-        if (memorySummary) {
-          fullMessages.push({
-            role: 'system',
-            content: `以下是之前的对话摘要：\n${memorySummary}`
-          })
-        }
-
-        // 3. 历史消息
-        recentMessages.forEach(msg => {
-          fullMessages.push({
-            role: msg.role,
-            content: msg.content
-          })
-        })
-
-        // 步骤五：调用 AI 并处理工具（使用新的工具调用引擎）
-        const enabledTools = mockTools.filter(t => t.enabled)
-        const toolDefinitions = buildToolDefinitions(enabledTools)
-        
-        // 第一次调用 AI（带工具）
-        const firstResult = await callAIProvider(null, fullMessages, { tools: toolDefinitions })
-        let finalReply = firstResult.reply
-        const toolResults = []
-        
-        // 如果 AI 要求调用工具
-        if (firstResult.toolCalls && firstResult.toolCalls.length > 0) {
-          console.log(`[工具调用] AI 请求调用 ${firstResult.toolCalls.length} 个工具`)
-          
-          // 把 AI 的工具调用消息加入上下文
-          fullMessages.push(firstResult.message)
-          
-          // 执行所有工具调用
-          for (const toolCall of firstResult.toolCalls) {
-            const toolResult = await executeToolCall(toolCall, enabledTools)
-            toolResults.push(toolResult)
-            
-            // 把工具结果加入消息上下文
-            fullMessages.push({
-              role: 'tool',
-              tool_call_id: toolCall.id,
-              name: toolCall.function.name,
-              content: JSON.stringify(toolResult),
-            })
-          }
-          
-          // 第二次调用 AI，使用工具结果生成最终回复
-          const secondResult = await callAIProvider(null, fullMessages)
-          finalReply = secondResult.reply
-        }
-
-        // 步骤六：保存 AI 回复到数据库
-        const savedAiMsg = await supabaseCreateMessage({
-          chat_id: chatId,
-          role: 'assistant',
-          content: finalReply,
-        })
-
-        // 更新会话的 updated_at 和 preview
-        await supabaseUpdateChat(chatId, {
-          preview: finalReply.slice(0, 100) + (finalReply.length > 100 ? '...' : '')
-        })
-
-        // 步骤七：返回回复给前端
-        return sendJson(res, 200, {
-          reply: finalReply,
-          messageId: savedAiMsg.id,
-          toolResults: toolResults
-        })
-
       } catch (error) {
         console.error('对话处理错误:', error)
         return sendJson(res, 500, { error: error.message })
@@ -1738,11 +1256,10 @@ ${messagesText}
     // ===== AI 状态 API =====
     if (pathname === '/api/ai-status' && req.method === 'GET') {
       const checks = [
-        { key: 'supabase', label: 'Supabase 后端连接配置', ok: !USE_MOCK, message: USE_MOCK ? '本地 mock 模式' : '已连接 Supabase' },
+        { key: 'storage', label: '本地存储', ok: true, message: '本地 JSON 存储' },
         { key: 'secret', label: 'AI 密钥加密配置', ok: Boolean(process.env.AI_CONFIG_SECRET), message: process.env.AI_CONFIG_SECRET ? '已配置' : '未配置' },
-        { key: 'table', label: 'AI 配置数据表', ok: true, message: USE_MOCK ? '本地 JSON 存储' : 'Supabase 表' },
       ]
-      return sendJson(res, 200, { ok: checks.every(c => c.ok), checks, providerCount: USE_MOCK ? mockAIProviders.length : 0 })
+      return sendJson(res, 200, { ok: checks.every(c => c.ok), checks, providerCount: mockAIProviders.length })
     }
 
     // ===== 应用日志 API =====
@@ -1759,53 +1276,38 @@ ${messagesText}
         ok: true, 
         timestamp: Date.now(),
         uptime: process.uptime(),
-        mode: USE_MOCK ? 'mock' : 'supabase'
+        mode: 'local'
       })
     }
 
     // ===== AI 接入配置 API =====
     if (pathname === '/api/ai-providers' && req.method === 'GET') {
-      if (USE_MOCK) {
-        return sendJson(res, 200, { data: mockAIProviders })
-      }
-      const providers = await supabaseGetAIProviders()
-      return sendJson(res, 200, { data: providers })
+      return sendJson(res, 200, { data: mockAIProviders })
     }
 
     if (pathname === '/api/ai-providers' && req.method === 'POST') {
       const body = await readBody(req)
-      if (USE_MOCK) {
-        const newProvider = {
-          id: `provider-${Date.now()}`,
-          name: body.name,
-          provider_type: body.providerType || 'openai_compatible',
-          endpoint: body.endpoint,
-          model: body.model,
-          enabled: body.enabled ?? true,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          hasApiKey: Boolean(body.apiKey),
-          apiKey: '******',
-          _apiKeyPlain: body.apiKey || '', // Mock 模式明文存储，方便测试
-        }
-        mockAIProviders.unshift(newProvider)
-        writeStorage('ai-providers', mockAIProviders)
-        return sendJson(res, 200, { data: newProvider })
+      const newProvider = {
+        id: `provider-${Date.now()}`,
+        name: body.name,
+        provider_type: body.providerType || 'openai_compatible',
+        endpoint: body.endpoint,
+        model: body.model,
+        enabled: body.enabled ?? true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        hasApiKey: Boolean(body.apiKey),
+        apiKey: '******',
+        _apiKeyPlain: body.apiKey || '',
       }
-      const provider = await supabaseCreateAIProvider(body)
-      return sendJson(res, 200, { data: provider })
+      mockAIProviders.unshift(newProvider)
+      writeStorage('ai-providers', mockAIProviders)
+      return sendJson(res, 200, { data: newProvider })
     }
 
     if (pathname.match(/\/api\/ai-providers\/(.+)\/test/) && req.method === 'POST') {
       const id = pathname.split('/')[3]
-      
-      let provider = null
-      if (USE_MOCK) {
-        provider = mockAIProviders.find(p => p.id === id)
-      } else {
-        const { data } = await supabase.from('ai_providers').select('*').eq('id', id).single()
-        provider = data
-      }
+      const provider = mockAIProviders.find(p => p.id === id)
       
       if (!provider) {
         return sendJson(res, 404, { ok: false, error: 'AI 配置不存在' })
@@ -1818,25 +1320,17 @@ ${messagesText}
     if (pathname.match(/\/api\/ai-providers\/.+/) && req.method === 'PATCH') {
       const id = pathname.split('/')[3]
       const updates = await readBody(req)
-      if (USE_MOCK) {
-        const provider = mockAIProviders.find(p => p.id === id)
-        if (provider) Object.assign(provider, updates, { updated_at: new Date().toISOString() })
-        writeStorage('ai-providers', mockAIProviders)
-        return sendJson(res, 200, { data: provider })
-      }
-      const provider = await supabaseUpdateAIProvider(id, updates)
+      const provider = mockAIProviders.find(p => p.id === id)
+      if (provider) Object.assign(provider, updates, { updated_at: new Date().toISOString() })
+      writeStorage('ai-providers', mockAIProviders)
       return sendJson(res, 200, { data: provider })
     }
 
     if (pathname.match(/\/api\/ai-providers\/.+/) && req.method === 'DELETE') {
       const id = pathname.split('/')[3]
-      if (USE_MOCK) {
-        const index = mockAIProviders.findIndex(p => p.id === id)
-        if (index !== -1) mockAIProviders.splice(index, 1)
-        writeStorage('ai-providers', mockAIProviders)
-        return sendJson(res, 200, { ok: true })
-      }
-      await supabaseDeleteAIProvider(id)
+      const index = mockAIProviders.findIndex(p => p.id === id)
+      if (index !== -1) mockAIProviders.splice(index, 1)
+      writeStorage('ai-providers', mockAIProviders)
       return sendJson(res, 200, { ok: true })
     }
 
@@ -1847,43 +1341,29 @@ ${messagesText}
       const isPinned = url.searchParams.get('is_pinned')
       const isResolved = url.searchParams.get('is_resolved')
       const source = url.searchParams.get('source')
-      const tag = url.searchParams.get('tag')          // 【新增】按标签过滤
-      const crossSession = url.searchParams.get('cross') === 'true'  // 【新增】跨会话开关
+      const tag = url.searchParams.get('tag')
+      const crossSession = url.searchParams.get('cross') === 'true'
 
-      const filters = {}
-      if (isActive !== null) filters.is_active = isActive === 'true'
-      if (isPinned !== null) filters.is_pinned = isPinned === 'true'
-      if (isResolved !== null) filters.is_resolved = isResolved === 'true'
-      if (source) filters.source = source
+      let memories = readStorage('memories') || []
 
-      if (USE_MOCK) {
-        let mockMemories = readStorage('memories') || []
-
-        // ---------- 【跨会话检索】----------
-        if (crossSession && chatId) {
-          const relatedChatIds = getRelatedChatIds(chatId)
-          // 【修复】同时包含关联会话记忆和全局记忆（日记）
-          mockMemories = mockMemories.filter(m => relatedChatIds.includes(m.chat_id) || !m.chat_id)
-        } else if (chatId) {
-          // 【修复】同时包含当前会话记忆和全局记忆（日记）
-          mockMemories = mockMemories.filter(m => m.chat_id === chatId || !m.chat_id)
-        }
-
-        if (isActive !== null) mockMemories = mockMemories.filter(m => m.is_active === (isActive === 'true'))
-        if (isPinned !== null) mockMemories = mockMemories.filter(m => m.is_pinned === (isPinned === 'true'))
-        if (isResolved !== null) mockMemories = mockMemories.filter(m => m.is_resolved === (isResolved === 'true'))
-        if (source) mockMemories = mockMemories.filter(m => m.source === source)
-
-        // ---------- 【标签过滤】----------
-        if (tag) {
-          mockMemories = mockMemories.filter(m =>
-            m.tags && m.tags.some(t => t.toLowerCase().includes(tag.toLowerCase()))
-          )
-        }
-
-        return sendJson(res, 200, { data: mockMemories })
+      if (crossSession && chatId) {
+        const relatedChatIds = getRelatedChatIds(chatId)
+        memories = memories.filter(m => relatedChatIds.includes(m.chat_id) || !m.chat_id)
+      } else if (chatId) {
+        memories = memories.filter(m => m.chat_id === chatId || !m.chat_id)
       }
-      const memories = await supabaseGetMemories(chatId, filters)
+
+      if (isActive !== null) memories = memories.filter(m => m.is_active === (isActive === 'true'))
+      if (isPinned !== null) memories = memories.filter(m => m.is_pinned === (isPinned === 'true'))
+      if (isResolved !== null) memories = memories.filter(m => m.is_resolved === (isResolved === 'true'))
+      if (source) memories = memories.filter(m => m.source === source)
+
+      if (tag) {
+        memories = memories.filter(m =>
+          m.tags && m.tags.some(t => t.toLowerCase().includes(tag.toLowerCase()))
+        )
+      }
+
       return sendJson(res, 200, { data: memories })
     }
 
@@ -1921,9 +1401,7 @@ ${messagesText}
 
       // ---------- 【语义去重检查】----------
       if (!body.skipDuplicateCheck) {
-        const existingMemories = USE_MOCK
-          ? (readStorage('memories') || [])
-          : await supabaseGetMemories(body.chat_id || null, { is_active: true })
+        const existingMemories = readStorage('memories') || []
 
         const duplicate = await findSimilarMemory(body.content, existingMemories)
         if (duplicate) {
@@ -1935,62 +1413,44 @@ ${messagesText}
         }
       }
 
-      if (USE_MOCK) {
-        const newMemory = {
-          ...memoryData,
-          id: `mem-${Date.now()}`,
-          activation_count: 0,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }
-        const mockMemories = readStorage('memories') || []
-        mockMemories.unshift(newMemory)
-        writeStorage('memories', mockMemories)
-        return sendJson(res, 200, { data: newMemory })
+      const newMemory = {
+        ...memoryData,
+        id: `mem-${Date.now()}`,
+        activation_count: 0,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       }
-
-      const memory = await supabaseCreateMemory(memoryData)
-      return sendJson(res, 200, { data: memory })
+      const memories = readStorage('memories') || []
+      memories.unshift(newMemory)
+      writeStorage('memories', memories)
+      return sendJson(res, 200, { data: newMemory })
     }
 
     if (pathname.match(/\/api\/memories\/.+/) && req.method === 'GET') {
       const memoryId = pathname.split('/')[3]
-      if (USE_MOCK) {
-        const mockMemories = readStorage('memories') || []
-        const memory = mockMemories.find(m => m.id === memoryId)
-        return sendJson(res, 200, { data: memory || null })
-      }
-      const memory = await supabaseGetMemoryById(memoryId)
-      return sendJson(res, 200, { data: memory })
+      const memories = readStorage('memories') || []
+      const memory = memories.find(m => m.id === memoryId)
+      return sendJson(res, 200, { data: memory || null })
     }
 
     if (pathname.match(/\/api\/memories\/.+/) && req.method === 'PATCH') {
       const memoryId = pathname.split('/')[3]
       const updates = await readBody(req)
 
-      if (USE_MOCK) {
-        const mockMemories = readStorage('memories') || []
-        const index = mockMemories.findIndex(m => m.id === memoryId)
-        if (index !== -1) {
-          mockMemories[index] = { ...mockMemories[index], ...updates, updated_at: new Date().toISOString() }
-          writeStorage('memories', mockMemories)
-        }
-        return sendJson(res, 200, { data: mockMemories[index] || null })
+      const memories = readStorage('memories') || []
+      const index = memories.findIndex(m => m.id === memoryId)
+      if (index !== -1) {
+        memories[index] = { ...memories[index], ...updates, updated_at: new Date().toISOString() }
+        writeStorage('memories', memories)
       }
-
-      const memory = await supabaseUpdateMemory(memoryId, updates)
-      return sendJson(res, 200, { data: memory })
+      return sendJson(res, 200, { data: memories[index] || null })
     }
 
     if (pathname.match(/\/api\/memories\/.+/) && req.method === 'DELETE') {
       const memoryId = pathname.split('/')[3]
-      if (USE_MOCK) {
-        const mockMemories = readStorage('memories') || []
-        const filtered = mockMemories.filter(m => m.id !== memoryId)
-        writeStorage('memories', filtered)
-        return sendJson(res, 200, { ok: true })
-      }
-      await supabaseDeleteMemory(memoryId)
+      const memories = readStorage('memories') || []
+      const filtered = memories.filter(m => m.id !== memoryId)
+      writeStorage('memories', filtered)
       return sendJson(res, 200, { ok: true })
     }
 
@@ -1999,33 +1459,62 @@ ${messagesText}
       const chatId = body.chat_id
       const limit = body.limit || 10
 
-      if (USE_MOCK) {
-        let mockMemories = readStorage('memories') || []
-        // 【修复】同时包含当前会话的记忆和全局记忆（chat_id 为 null 的日记）
-        if (chatId) mockMemories = mockMemories.filter(m => m.chat_id === chatId || !m.chat_id)
-        mockMemories = mockMemories.filter(m => m.is_active)
-        return sendJson(res, 200, { data: mockMemories.slice(0, limit) })
-      }
-
-      const memories = await surfaceMemories(chatId, limit)
-      return sendJson(res, 200, { data: memories })
+      let memories = readStorage('memories') || []
+      if (chatId) memories = memories.filter(m => m.chat_id === chatId || !m.chat_id)
+      memories = memories.filter(m => m.is_active)
+      return sendJson(res, 200, { data: memories.slice(0, limit) })
     }
 
     if (pathname.match(/\/api\/memories\/.+\/touch/) && req.method === 'POST') {
       const memoryId = pathname.split('/')[3]
-      if (USE_MOCK) {
-        const mockMemories = readStorage('memories') || []
-        const index = mockMemories.findIndex(m => m.id === memoryId)
-        if (index !== -1) {
-          mockMemories[index].activation_count = (mockMemories[index].activation_count || 0) + 1
-          mockMemories[index].last_activated_at = new Date().toISOString()
-          mockMemories[index].updated_at = new Date().toISOString()
-          writeStorage('memories', mockMemories)
-        }
-        return sendJson(res, 200, { data: mockMemories[index] || null })
+      const memories = readStorage('memories') || []
+      const index = memories.findIndex(m => m.id === memoryId)
+      if (index !== -1) {
+        memories[index].activation_count = (memories[index].activation_count || 0) + 1
+        memories[index].last_activated_at = new Date().toISOString()
+        memories[index].updated_at = new Date().toISOString()
+        writeStorage('memories', memories)
       }
-      const memory = await supabaseTouchMemory(memoryId)
-      return sendJson(res, 200, { data: memory })
+      return sendJson(res, 200, { data: memories[index] || null })
+    }
+
+    // ===== 日记管理 API =====
+    if (pathname === '/api/diary/compile' && req.method === 'POST') {
+      const body = await readBody(req)
+      const dateStr = body.date || null
+      
+      console.log(`\n[日记 API] 手动触发日记整理，日期: ${dateStr || '今天'}\n`)
+      
+      try {
+        await compileDailyDiary(dateStr)
+        return sendJson(res, 200, { 
+          ok: true, 
+          message: dateStr ? `已整理 ${dateStr} 的日记` : '已整理今日日记' 
+        })
+      } catch (err) {
+        console.error('[日记 API] 整理失败:', err)
+        return sendJson(res, 500, { error: err.message })
+      }
+    }
+
+    if (pathname === '/api/diary/status' && req.method === 'GET') {
+      const allMemories = readStorage('memories') || []
+      
+      const diaries = allMemories.filter(m => m.source === 'daily_diary' && m.is_active)
+      const todayDiary = diaries.find(d => {
+        const dateTag = d.tags?.find(t => /^\d{4}-\d{2}-\d{2}$/.test(t))
+        return dateTag === getBeijingDateStr()
+      })
+      
+      return sendJson(res, 200, {
+        data: {
+          totalDiaries: diaries.length,
+          todayDiaryExists: !!todayDiary,
+          lastDiaryDate: diaries.length > 0 
+            ? (diaries[0].tags?.find(t => /^\d{4}-\d{2}-\d{2}$/.test(t)) || diaries[0].created_at?.split('T')[0])
+            : null
+        }
+      })
     }
 
     // ===== 工具配置 API =====
@@ -2279,54 +1768,7 @@ async function executeCode(code) {
   })
 }
 
-async function initDatabase() {
-  if (USE_MOCK) return
-  
-  try {
-    const initQueries = [
-      `ALTER TABLE IF EXISTS memories ADD COLUMN IF NOT EXISTS valence REAL DEFAULT 0.5`,
-      `ALTER TABLE IF EXISTS memories ADD COLUMN IF NOT EXISTS arousal REAL DEFAULT 0.3`,
-      `ALTER TABLE IF EXISTS memories ADD COLUMN IF NOT EXISTS importance INTEGER DEFAULT 5`,
-      `ALTER TABLE IF EXISTS memories ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN DEFAULT FALSE`,
-      `ALTER TABLE IF EXISTS memories ADD COLUMN IF NOT EXISTS is_resolved BOOLEAN DEFAULT FALSE`,
-      `ALTER TABLE IF EXISTS memories ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE`,
-      `ALTER TABLE IF EXISTS memories ADD COLUMN IF NOT EXISTS source TEXT`,
-      `ALTER TABLE IF EXISTS memories ADD COLUMN IF NOT EXISTS activation_count INTEGER DEFAULT 0`,
-      `ALTER TABLE IF EXISTS memories ADD COLUMN IF NOT EXISTS last_activated_at TIMESTAMPTZ`,
-      `CREATE TABLE IF NOT EXISTS knowledge_documents (
-        id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-        source_name TEXT NOT NULL,
-        original_content TEXT NOT NULL,
-        file_type TEXT DEFAULT 'md',
-        room TEXT DEFAULT 'default',
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      )`,
-      `CREATE TABLE IF NOT EXISTS knowledge_chunks (
-        id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-        source_name TEXT NOT NULL,
-        chunk_index INTEGER DEFAULT 0,
-        content TEXT NOT NULL,
-        document_id UUID REFERENCES knowledge_documents(id) ON DELETE CASCADE,
-        room TEXT DEFAULT 'default',
-        created_at TIMESTAMPTZ DEFAULT NOW()
-      )`,
-      `CREATE INDEX IF NOT EXISTS idx_memories_chat_id ON memories(chat_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_memories_is_active ON memories(is_active)`,
-      `CREATE INDEX IF NOT EXISTS idx_memories_is_pinned ON memories(is_pinned)`,
-      `CREATE INDEX IF NOT EXISTS idx_memories_is_resolved ON memories(is_resolved)`,
-    ]
 
-    for (const query of initQueries) {
-      await supabase.rpc('execute_sql', { query })
-    }
-    
-    console.log('[SUPABASE] 记忆系统表结构初始化完成')
-  } catch (err) {
-    console.error('[SUPABASE] 表结构初始化失败:', err.message)
-    console.log('[SUPABASE] 请在 Supabase 控制台手动执行 supabase-memory-schema.sql')
-  }
-}
 
 // 获取北京时间的日期字符串 YYYY-MM-DD
 function getBeijingDateStr() {
@@ -2336,27 +1778,24 @@ function getBeijingDateStr() {
 }
 
 // ========== 日记整理功能（每天 0 点自动执行） ==========
-async function compileDailyDiary() {
-  const dateStr = getBeijingDateStr()
+// dateStr 参数可选，不传则整理今天的日记
+async function compileDailyDiary(dateStr = null) {
+  // 如果没有指定日期，使用今天的日期
+  const targetDateStr = dateStr || getBeijingDateStr()
   
-  console.log(`\n[日记整理] ===== ${dateStr} 日记整理开始 =====`)
-  console.log(`[日记整理] 开始整理今日的记忆...`)
+  console.log(`\n[日记整理] ===== ${targetDateStr} 日记整理开始 =====`)
+  console.log(`[日记整理] 开始整理记忆...`)
   
   try {
-    // 获取今天创建的所有活跃记忆（不局限于"日常交流"标签，
-    // 手动添加的、压缩生成的、QQ群聊的记忆都会参与日记整理）
     const allMemories = readStorage('memories') || []
     const todayMemories = allMemories.filter(m => {
-      // 只收录活跃的、未归档的记忆
       if (!m.is_active) return false
       
-      // 检查创建日期是否是今天（按北京时间）
       const memDate = new Date(m.created_at || m.date)
-      // 转换为北京时间
       const memBeijingTime = new Date(memDate.getTime() + 8 * 60 * 60 * 1000)
       const memDateStr = `${memBeijingTime.getUTCFullYear()}-${String(memBeijingTime.getUTCMonth() + 1).padStart(2, '0')}-${String(memBeijingTime.getUTCDate()).padStart(2, '0')}`
       
-      return memDateStr === dateStr
+      return memDateStr === targetDateStr
     })
     
     if (todayMemories.length === 0) {
@@ -2391,13 +1830,12 @@ ${memoriesText}
     ])
     
     if (diaryResult.reply && diaryResult.reply.trim()) {
-      // 创建新的日记记忆
       const newDiary = {
         id: `diary-${Date.now()}`,
-        chat_id: null, // 日记是全局的，不绑定特定 chat
+        chat_id: null,
         content: diaryResult.reply.trim(),
         source: 'daily_diary',
-        tags: ['日记', dateStr],
+        tags: ['日记', targetDateStr],
         is_active: true,
         is_pinned: true, // 日记默认置顶
         is_resolved: false,
@@ -2405,7 +1843,7 @@ ${memoriesText}
         valence: 0.7,
         arousal: 0.4,
         activation_count: 1,
-        date: dateStr,
+        date: targetDateStr,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       }
@@ -2430,7 +1868,7 @@ ${memoriesText}
         const memBeijingTime = new Date(memDate.getTime() + 8 * 60 * 60 * 1000)
         const memDateStr = `${memBeijingTime.getUTCFullYear()}-${String(memBeijingTime.getUTCMonth() + 1).padStart(2, '0')}-${String(memBeijingTime.getUTCDate()).padStart(2, '0')}`
         
-        if (memDateStr === dateStr) {
+        if (memDateStr === targetDateStr) {
           // 归档：压缩记忆必须归档，其他当天非置顶记忆也归档
           if (m.source === 'compression' || selectedMemories.some(s => s.id === m.id)) {
             archivedCount++
@@ -2442,7 +1880,7 @@ ${memoriesText}
       
       writeStorage('memories', updatedMemories)
       
-      console.log(`[日记整理] 成功！生成了 ${dateStr} 的日记`)
+      console.log(`[日记整理] 成功！生成了 ${targetDateStr} 的日记`)
       console.log(`[日记整理] 日记摘要: ${diaryResult.reply.trim().substring(0, 150)}...`)
       console.log(`[日记整理] 已自动归档 ${archivedCount} 条用过的记忆（含压缩记忆）`)
     }
@@ -2467,32 +1905,67 @@ function isBeijingMidnight() {
   return getBeijingHour() === 0
 }
 
-// 设置每天 0 点（北京时间）的定时任务
+async function checkAndBackfillMissingDiaries() {
+  console.log(`\n[日记补生成] ===== 检查是否有缺失的日记 =====`)
+  
+  const allMemories = readStorage('memories') || []
+  
+  const existingDiaryDates = new Set()
+  allMemories.forEach(m => {
+    if (m.source === 'daily_diary') {
+      const dateTag = m.tags?.find(t => /^\d{4}-\d{2}-\d{2}$/.test(t))
+      if (dateTag) existingDiaryDates.add(dateTag)
+    }
+  })
+  
+  const todayStr = getBeijingDateStr()
+  const todayDate = new Date(todayStr)
+  let checkDate = new Date(todayDate)
+  checkDate.setDate(checkDate.getDate() - 1)
+  
+  let backfilledCount = 0
+  const maxBackfillDays = 30
+  
+  for (let i = 0; i < maxBackfillDays; i++) {
+    const checkDateStr = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`
+    
+    if (existingDiaryDates.has(checkDateStr)) {
+      console.log(`[日记补生成] ${checkDateStr} 已有日记，跳过`)
+    } else {
+      console.log(`[日记补生成] ${checkDateStr} 缺少日记，开始补生成...`)
+      await compileDailyDiary(checkDateStr)
+      backfilledCount++
+    }
+    
+    checkDate.setDate(checkDate.getDate() - 1)
+  }
+  
+  console.log(`[日记补生成] 完成！共补生成 ${backfilledCount} 篇日记\n`)
+}
+
 function setupDailyDiaryTask() {
   console.log(`\n[定时任务] 已启动日记整理定时任务（北京时间 00:00 执行）\n`)
   
   let lastRunDate = null
   
-  // ===== 【修复】每分钟检查一次，确保不会错过 0 点触发窗口
-  // 避免服务器重启时间非整点导致错过
   setInterval(() => {
     const now = new Date()
     const beijingTime = new Date(now.getTime() + 8 * 60 * 60 * 1000)
-    const todayStr = beijingTime.toISOString().split('T')[0] // YYYY-MM-DD
+    const todayStr = beijingTime.toISOString().split('T')[0]
     
     if (isBeijingMidnight() && lastRunDate !== todayStr) {
       console.log(`\n[定时任务] ===== 到达北京时间 00:00，开始整理日记 =====\n`)
       compileDailyDiary()
       lastRunDate = todayStr
     }
-  }, 60 * 1000) // 【修复】每分钟检查一次（原1小时太容易错过）
+  }, 60 * 1000)
 }
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n========================================`)
   console.log(`本地开发服务器已启动`)
   console.log(`地址: http://localhost:${PORT}`)
-  console.log(`模式: ${USE_MOCK ? 'MOCK (本地 JSON)' : 'SUPABASE (真实数据库)'}`)
+  console.log(`模式: LOCAL (本地 JSON 存储)`)
   console.log(`========================================\n`)
   
   console.log('可用 API:')
@@ -2506,7 +1979,14 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('  GET/POST/PATCH/DELETE /api/memories')
   console.log('  POST /api/memories/surface')
   console.log('  POST /api/memories/{id}/touch')
+  console.log('  POST /api/diary/compile    (手动触发日记整理)')
+  console.log('  GET  /api/diary/status     (查看日记状态)')
   
-  // 启动每日日记整理定时任务【已修复】：所有模式都启用，不限制MOCK
   setupDailyDiaryTask()
+  
+  setTimeout(() => {
+    checkAndBackfillMissingDiaries().catch(err => {
+      console.error('[日记补生成] 启动时检查失败:', err)
+    })
+  }, 5000)
 })

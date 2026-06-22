@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { api } from '../lib/api'
+import { api, compileDiary, getDiaryStatus } from '../lib/api'
 
 // 返回图标
 const BackIcon = () => (
@@ -124,6 +124,11 @@ function DiaryPanel({ onClose }) {
   const [editorTagInput, setEditorTagInput] = useState('')
   const [isSaving, setIsSaving] = useState(false)
 
+  // AI 日记整理状态
+  const [diaryStatus, setDiaryStatus] = useState(null)
+  const [isCompiling, setIsCompiling] = useState(false)
+  const [compileMessage, setCompileMessage] = useState('')
+
   useEffect(() => {
     loadDiaries()
   }, [])
@@ -159,9 +164,10 @@ function DiaryPanel({ onClose }) {
     setIsLoading(true)
     try {
       // 获取 daily_diary 和 manual_diary 两种来源的日记
-      const [resAuto, resManual] = await Promise.all([
+      const [resAuto, resManual, statusRes] = await Promise.all([
         api.get('/api/memories?source=daily_diary'),
         api.get('/api/memories?source=manual_diary'),
+        getDiaryStatus(),
       ])
       const autoDiaries = resAuto.data || []
       const manualDiaries = resManual.data || []
@@ -170,11 +176,32 @@ function DiaryPanel({ onClose }) {
         (a, b) => new Date(b.created_at) - new Date(a.created_at)
       )
       setDiaries(all)
+      setDiaryStatus(statusRes)
     } catch (error) {
       console.error('加载日记失败:', error)
       setDiaries([])
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  // 手动触发 AI 整理日记
+  const handleCompileDiary = async () => {
+    setIsCompiling(true)
+    setCompileMessage('')
+    try {
+      const result = await compileDiary()
+      if (result.ok) {
+        setCompileMessage(result.message)
+        await loadDiaries()
+      } else {
+        setCompileMessage(result.error || '整理失败')
+      }
+    } catch (error) {
+      setCompileMessage(error.message)
+    } finally {
+      setIsCompiling(false)
+      setTimeout(() => setCompileMessage(''), 3000)
     }
   }
 
@@ -393,12 +420,27 @@ function DiaryPanel({ onClose }) {
           <h1 className="panel-title">日记</h1>
           <div className="tool-header-actions">
             <span className="panel-subtitle">共 {totalCount} 篇日记</span>
+            <button 
+              className="compile-btn" 
+              onClick={handleCompileDiary}
+              disabled={isCompiling}
+            >
+              <span className="compile-icon">🤖</span>
+              {isCompiling ? '整理中...' : 'AI整理'}
+            </button>
             <button className="add-tool-btn" onClick={openNewEditor}>
               <PlusIcon />
               写日记
             </button>
           </div>
         </div>
+
+        {/* AI 整理提示 */}
+        {compileMessage && (
+          <div className={`compile-message ${compileMessage.includes('成功') || compileMessage.includes('已整理') ? 'success' : 'error'}`}>
+            {compileMessage}
+          </div>
+        )}
 
         <div className="panel-content">
           {/* 月份选择器 */}

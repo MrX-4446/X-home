@@ -4879,6 +4879,55 @@ select.ai-form-input option:first-child {
   color: var(--text-muted);
 }
 
+/* AI 整理按钮 */
+.compile-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: var(--radius-md);
+  background-color: rgba(122, 138, 153, 0.1);
+  color: var(--primary-warm-gray-blue);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.compile-btn:hover {
+  background-color: rgba(122, 138, 153, 0.2);
+}
+
+.compile-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.compile-icon {
+  font-size: 14px;
+}
+
+/* AI 整理消息提示 */
+.compile-message {
+  padding: 10px 16px;
+  margin: 0 16px 12px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 500;
+  animation: fadeIn 0.2s ease;
+}
+
+.compile-message.success {
+  background-color: rgba(80, 140, 100, 0.15);
+  color: var(--primary-warm-gray-green);
+}
+
+.compile-message.error {
+  background-color: rgba(180, 95, 95, 0.15);
+  color: #b45f5f;
+}
+
 /* ========== 日记编辑器弹窗 ========== */
 .diary-editor-overlay {
   position: fixed;
@@ -6059,13 +6108,13 @@ html {
   padding: 4px 10px;
   border-radius: var(--radius-full);
   font-size: 11px;
-  background: linear-gradient(135deg, rgba(122,138,153,0.15), rgba(122,138,153,0.08);
+  background: linear-gradient(135deg, rgba(122,138,153,0.15), rgba(122,138,153,0.08));
   color: var(--primary-warm-gray-blue-dark);
   font-weight: 500;
   transition: all 0.2s ease;
 }
 
 .memory-tag:hover {
-  background: linear-gradient(135deg, rgba(122,138,153,0.25)), rgba(122,138,153,0.15);
+  background: linear-gradient(135deg, rgba(122,138,153,0.25), rgba(122,138,153,0.15));
   transform: translateY(-1px);
 }
