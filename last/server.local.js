@@ -371,7 +371,7 @@ function cosineSimilarity(text1, text2) {
 }
 
 // ---------- 2. 语义去重检查 ----------
-async function findSimilarMemory(newContent, existingMemories, threshold = 0.7) {
+async function findSimilarMemory(newContent, existingMemories, threshold = 0.6) {
   for (const mem of existingMemories) {
     const similarity = cosineSimilarity(newContent, mem.content)
     if (similarity >= threshold) {
@@ -523,9 +523,15 @@ async function surfaceMemoriesEnhanced(chatId, userMessage = '', limit = 10) {
     const emotionIntensity = Math.sqrt(mem.valence ** 2 + mem.arousal ** 2)
     const resolveBonus = mem.is_resolved ? 0.3 : 1.0
 
+    // 【修复】激活次数也要衰减：基于上次激活时间计算有效激活次数
+    const lastActivated = new Date(mem.last_activated_at || mem.created_at)
+    const hoursSinceActivated = (now - lastActivated) / (1000 * 60 * 60)
+    const activationDecay = Math.exp(-0.02 * hoursSinceActivated)  // 激活次数衰减系数
+    const effectiveActivationCount = (mem.activation_count || 0) * activationDecay
+
     // 1. 规则基础分（50%权重）
     const ruleScore = (mem.importance * 0.4 +
-                       mem.activation_count * 0.2 +
+                       effectiveActivationCount * 0.2 +
                        emotionIntensity * 0.2 +
                        decay * 0.2) * resolveBonus
 
@@ -1216,54 +1222,55 @@ ${messagesText}
 
         const userSystemPrompt = getSetting('system_prompt') || ''
           
-          // ========== 【新增】加载并浮现记忆 ==========
-          const allMemories = readStorage('memories') || []
-          // 【修复】只加载活跃记忆，并包含全局日记（chat_id 为 null）
-          const chatMemories = allMemories.filter(m => m.is_active && (!m.chat_id || m.chat_id === chatId))
+          // ========== 加载并浮现记忆（使用增强版检索） ==========
+          // 获取最后一条用户消息内容，用于语义相关性过滤
+          let lastUserMessage = ''
+          for (let i = newMessages.length - 1; i >= 0; i--) {
+            if (newMessages[i].role === 'user') {
+              lastUserMessage = newMessages[i].content || ''
+              break
+            }
+          }
           
-          // 简单的记忆评分和排序
-          const now = new Date()
-          const decayRate = 0.01
+          // 使用增强版记忆检索（包含语义相似度和混合打分）
+          const sortedMemories = await surfaceMemoriesEnhanced(chatId, lastUserMessage, 5)
           
-          const scoredMemories = chatMemories.map(mem => {
-            const created = new Date(mem.created_at || mem.date || now)
-            const hoursSinceCreated = (now - created) / (1000 * 60 * 60)
-            const decay = Math.exp(-decayRate * hoursSinceCreated)
-            
-            const score = (mem.importance || 5) * 0.4 +
-                         (mem.activation_count || 0) * 0.2 +
-                         decay * 0.4
-            
-            return { ...mem, score }
+          // 【新增】语义相关性过滤：只保留与当前对话相关的记忆
+          const RELEVANCE_THRESHOLD = 0.15  // 语义相关性阈值，低于此值的记忆将被过滤
+          const relevantMemories = sortedMemories.filter(mem => {
+            // 置顶记忆直接通过
+            if (mem.is_pinned) return true
+            // 非置顶记忆需要满足语义相关性阈值
+            const relevance = mem.semanticScore || 0
+            return relevance >= RELEVANCE_THRESHOLD
           })
           
-          // 排序：置顶优先，然后按评分，取前 5 条
-          const sortedMemories = scoredMemories.sort((a, b) => {
-            if (a.is_pinned && !b.is_pinned) return -1
-            if (!a.is_pinned && b.is_pinned) return 1
-            return b.score - a.score
-          }).slice(0, 5)
-          
-          // 构建记忆摘要，并更新被检索到的记忆的激活次数
+          // 构建记忆摘要，并更新被检索到的记忆的激活次数（带衰减）
           let memoryContext = ''
-          if (sortedMemories.length > 0) {
+          if (relevantMemories.length > 0) {
             memoryContext = `\n【重要记忆回顾】
 以下是你需要记住的关于轩的重要信息（恋人X的视角）：
-${sortedMemories.map((m, i) => `${i + 1}. ${m.content}`).join('\n')}
+${relevantMemories.map((m, i) => `${i + 1}. ${m.content}`).join('\n')}
 请在对话中自然地运用这些记忆。
 `
-            console.log(`[记忆加载] 成功加载 ${sortedMemories.length} 条记忆`)
+            console.log(`[记忆加载] 成功加载 ${relevantMemories.length} 条相关记忆（过滤前: ${sortedMemories.length}）`)
             
-            // 更新这些记忆的激活次数（被检索到就 +1）
+            // 【修复】更新记忆激活次数，使用指数衰减
             const allMemories = readStorage('memories') || []
-            sortedMemories.forEach(retrievedMem => {
+            relevantMemories.forEach(retrievedMem => {
               const idx = allMemories.findIndex(m => m.id === retrievedMem.id)
               if (idx !== -1) {
-                allMemories[idx].activation_count = (allMemories[idx].activation_count || 0) + 1
+                // 激活次数衰减：每次被检索到，次数 = 上次次数 * 0.8 + 1
+                // 这样高频记忆的激活次数会趋于稳定，不会无限增长
+                const prevCount = allMemories[idx].activation_count || 0
+                allMemories[idx].activation_count = Math.round(prevCount * 0.8 + 1)
+                allMemories[idx].last_activated_at = new Date().toISOString()
                 allMemories[idx].updated_at = new Date().toISOString()
               }
             })
             writeStorage('memories', allMemories)
+          } else {
+            console.log('[记忆加载] 没有与当前对话相关的记忆')
           }
           
           // 获取当前时间上下文（让 AI 知道现在是什么时间）
