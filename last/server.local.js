@@ -190,8 +190,11 @@ const defaultAIProviders = [
   }
 ]
 
-// 读取本地存储，如果为空则使用默认配置
-const mockAIProviders = readStorage('ai-providers') || defaultAIProviders
+// 读取本地存储，如果为空或空数组则使用默认配置
+let mockAIProviders = readStorage('ai-providers')
+if (!mockAIProviders || mockAIProviders.length === 0) {
+  mockAIProviders = defaultAIProviders
+}
 const mockMemories = readStorage('memories') || []
 const mockTools = readStorage('tools') || [
   { id: 'tool-1', name: '网页搜索', description: '实时搜索互联网信息', iconKey: '搜索', enabled: true, category: '搜索', type: 'cloud' },
@@ -251,7 +254,10 @@ function getSetting(key) {
 // ========== 情感分析自动打标 ==========
 async function analyzeEmotion(content) {
   try {
-    const providers = readStorage('ai-providers') || []
+    let providers = readStorage('ai-providers')
+    if (!providers || providers.length === 0) {
+      providers = defaultAIProviders
+    }
     const enabledProviders = providers.filter(p => p.enabled).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
 
     if (!enabledProviders || enabledProviders.length === 0) {
@@ -811,7 +817,11 @@ async function executeToolCall(toolCall, enabledTools) {
 async function callAIProvider(provider, messages, options = {}) {
   const { tools = null, temperature, maxTokens, topP, useHelperAI = false, purpose = '主聊天' } = options
   
-  const storedProviders = readStorage('ai-providers') || []
+  let storedProviders = readStorage('ai-providers')
+  // 如果存储为空或空数组，使用默认配置
+  if (!storedProviders || storedProviders.length === 0) {
+    storedProviders = defaultAIProviders
+  }
   const enabledProviders = storedProviders.filter(p => p.enabled)
   let aiProvider = null
 
