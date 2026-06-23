@@ -1275,6 +1275,7 @@ ${relevantMemories.map((m, i) => `${i + 1}. ${m.content}`).join('\n')}
           
           // 获取当前时间上下文（让 AI 知道现在是什么时间）
           // ✅ 使用正确的北京时间（UTC+8）
+          const now = new Date()
           const utcTime = now.getTime() + now.getTimezoneOffset() * 60 * 1000
           const beijingNow = new Date(utcTime + 8 * 60 * 60 * 1000)
           const hour = beijingNow.getHours()
