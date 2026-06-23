@@ -832,9 +832,8 @@ async function callAIProvider(provider, messages, options = {}) {
   let aiProvider = null
 
   if (useHelperAI) {
-    let helperId = process.env.HELPER_AI_PROVIDER_ID
+    const helperId = process.env.HELPER_AI_PROVIDER_ID
     if (helperId) {
-      helperId = helperId.replace(/[^0-9]/g, '')
       aiProvider = enabledProviders.find(p => String(p.id) === String(helperId))
       if (!aiProvider) {
         throw new Error(`辅助AI配置不可用：HELPER_AI_PROVIDER_ID=${helperId}`)
