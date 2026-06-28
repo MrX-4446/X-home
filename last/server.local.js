@@ -211,12 +211,21 @@ const mockTools = readStorage('tools') || [
 ]
 
 // HTTP 响应辅助函数
+// CORS 配置：从环境变量读取允许的源，默认为 *（开发环境）
+// 生产环境建议设置为具体域名，例如：https://your-domain.com
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGINS || process.env.ALLOWED_ORIGIN || '*'
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+  'Access-Control-Allow-Credentials': 'true',
+  'Access-Control-Max-Age': '86400',
+}
+
 function sendJson(res, statusCode, data) {
   res.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    ...CORS_HEADERS,
   })
   res.end(JSON.stringify(data))
 }

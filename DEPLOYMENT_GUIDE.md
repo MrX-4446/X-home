@@ -117,11 +117,27 @@ curl http://localhost:8888/api/ai-status
 
 ## 🌐 第四步：部署前端
 
-### 4.1 构建前端（本地已构建或在服务器构建）
+### 4.1 前端环境配置（重要！）
+
 ```bash
 cd /www/wwwroot/chat-frontend
 
-# 如果需要在服务器构建
+# 检查环境变量配置
+cat .env
+
+# ✅ 生产环境建议：VITE_API_BASE 留空或不设置
+# 这样前端请求会走相对路径 /api/...，由 Nginx 代理到后端
+# 避免直接访问 8888 端口导致的 CORS 和安全问题
+
+# 如果 .env 中有 VITE_API_BASE=http://38.92.8.134:8888
+# 请注释掉或删除这一行！
+# 错误配置示例（不要这样做）：VITE_API_BASE=http://38.92.8.134:8888
+# 正确配置：不设置 VITE_API_BASE，或设置为空字符串
+```
+
+### 4.2 构建前端（本地已构建或在服务器构建）
+```bash
+# 确保环境变量配置正确后再构建
 npm install
 npm run build
 ```
@@ -293,6 +309,40 @@ netstat -tlnp | grep 8888
 ### 问题3：前端无法访问
 - 检查 Nginx 配置中的 root 路径
 - 检查文件权限：`chown -R www:www /www/wwwroot/chat-frontend`
+
+### 问题4：CORS 跨域错误
+**现象**：浏览器控制台显示 "Access-Control-Allow-Origin" 相关错误
+
+**排查步骤**：
+1. ✅ 检查前端是否配置了 `VITE_API_BASE=http://38.92.8.134:8888`
+   - **修复**：删除或注释掉这一行，让前端走相对路径通过 Nginx 代理
+   
+2. ✅ 验证后端 CORS 配置
+   ```bash
+   # 检查后端 .env 文件
+   cat /www/wwwroot/chat-backend/.env | grep ALLOWED_ORIGIN
+   
+   # 测试后端响应头
+   curl -I http://localhost:8888/api/heartbeat
+   ```
+
+3. ✅ 验证 Nginx 代理配置
+   - 确保 Nginx 配置中有 `/api` 代理到 `http://127.0.0.1:8888`
+   - 检查 Nginx 配置中的 CORS 头设置
+
+**正确的请求流程**：
+```
+前端（浏览器） → Nginx (80/443端口) → /api 代理 → 后端 (8888端口)
+                         ↓
+                 CORS 由 Nginx 处理
+```
+
+**错误的请求流程**（不推荐）：
+```
+前端（浏览器） → 后端 (8888端口) 直接访问
+                         ↓
+                 CORS 由后端 Node.js 处理
+```
 
 ---
 
