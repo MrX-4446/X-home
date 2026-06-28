@@ -2033,8 +2033,20 @@ async function compileDailyDiary(dateStr = null) {
       return `记忆 ${i + 1}：${importanceLabel}${m.content} ${sourceLabel}`
     }).join('\n\n')
     
+    // 格式化日期显示（中文格式）
+    const dateObj = new Date(targetDateStr + 'T12:00:00.000Z')
+    const year = dateObj.getUTCFullYear()
+    const month = dateObj.getUTCMonth() + 1
+    const day = dateObj.getUTCDate()
+    const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+    const weekday = weekdays[dateObj.getUTCDay()]
+    const dateDisplay = `${year}年${month}月${day}日 ${weekday}`
+    
     // 调用 AI 进行总结整理
-    const diaryPrompt = `请将以下的记忆整理成一篇连贯的日记，以恋人 X 的视角记录今天发生的事情，重点是关于轩的重要信息和美好回忆：
+    const diaryPrompt = `请将以下的记忆整理成一篇连贯的日记，以恋人 X 的视角记录今天发生的事情，重点是关于轩的重要信息和美好回忆。
+
+【重要提醒】今天的真实日期是：${dateDisplay}
+请在日记开头或适当位置体现这个真实日期，不要编造其他日期！
 
 ${memoriesText}
 
