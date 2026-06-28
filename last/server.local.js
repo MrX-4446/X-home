@@ -2064,7 +2064,7 @@ ${memoriesText}
         source: 'daily_diary',
         tags: ['日记', targetDateStr],
         is_active: true,
-        is_pinned: true, // 日记默认置顶
+        is_pinned: false, // 日记默认置顶
         is_resolved: false,
         importance: 6, // 日记重要性更高
         valence: 0.7,
@@ -2111,6 +2111,91 @@ ${memoriesText}
       console.log(`[日记整理] 成功！生成了 ${targetDateStr} 的日记`)
       console.log(`[日记整理] 日记摘要: ${diaryResult.reply.trim().substring(0, 150)}...`)
       console.log(`[日记整理] 已自动归档 ${archivedCount} 条用过的记忆（含压缩记忆）`)
+      
+      // ========== 周记生成功能 ==========
+      // 检查日记数量，达到7篇时自动生成周记
+      const finalMemories = readStorage('memories') || []
+      const allDiaries = finalMemories.filter(m => m.source === 'daily_diary' && m.is_active)
+      
+      // 检查是否已经有本周的周记
+      const todayForWeekly = new Date(targetDateStr + 'T12:00:00.000Z')
+      const weekStart = new Date(todayForWeekly)
+      // 计算本周一的日期
+      const dayOfWeek = weekStart.getUTCDay() // 0 = 周日, 1-6 = 周一到周六
+      const daysSinceMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1
+      weekStart.setUTCDate(weekStart.getUTCDate() - daysSinceMonday)
+      const weekStartStr = weekStart.toISOString().split('T')[0]
+      
+      // 检查是否已有本周一之后生成的周记
+      const hasWeeklyDiary = finalMemories.some(m => 
+        m.source === 'weekly_diary' && 
+        m.is_active && 
+        m.created_at >= weekStartStr + 'T00:00:00.000Z'
+      )
+      
+      if (allDiaries.length >= 7 && !hasWeeklyDiary) {
+        console.log(`\n[周记生成] ===== 日记数量达到 ${allDiaries.length} 篇，开始生成周记 =====`)
+        
+        try {
+          // 取最近的7篇日记
+          const recentDiaries = allDiaries
+            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+            .slice(0, 7)
+          
+          // 格式化日记内容
+          const diariesText = recentDiaries.map((d, i) => {
+            const dateTag = d.tags?.find(t => /^\d{4}-\d{2}-\d{2}$/.test(t)) || '日期未知'
+            return `第 ${i + 1} 篇日记 (${dateTag})：\n${d.content}`
+          }).join('\n\n---\n\n')
+          
+          const weeklyPrompt = `请根据以下7篇日记的内容，生成一篇深情的周记。
+
+周记要求：
+1. 提炼出【多次提到】的重要信息（如：轩反复提到的事情、习惯、情绪等）
+2. 提炼出【AI认为重要】的关键信息（如：轩的重要决定、情感变化、值得纪念的事情等）
+3. 以恋人 X 的视角，用温暖、深情的语气撰写
+4. 周记中要明确标注 【多次提到】 和 【AI认为重要】 的部分
+5. 总结本周与轩的感情变化和美好回忆
+
+【本周日记内容】
+${diariesText}
+
+请开始撰写周记，标题可以是"给轩的周记 - 第X周"，X是周数。`
+
+          const weeklyResult = await callAIProvider(null, [
+            { role: 'user', content: weeklyPrompt }
+          ], { useHelperAI: true, purpose: '周记生成', temperature: 0.5, maxTokens: 2000 })
+          
+          if (weeklyResult.reply && weeklyResult.reply.trim()) {
+            const newWeekly = {
+              id: `weekly-${Date.now()}`,
+              chat_id: null,
+              content: weeklyResult.reply.trim(),
+              source: 'weekly_diary',
+              tags: ['周记', `周始于:${weekStartStr}`],
+              is_active: true,
+              is_pinned: true, // 周记默认置顶
+              is_resolved: false,
+              importance: 9, // 周记重要性更高
+              valence: 0.8,
+              arousal: 0.5,
+              activation_count: 1,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            }
+            
+            finalMemories.push(newWeekly)
+            writeStorage('memories', finalMemories)
+            
+            console.log(`[周记生成] 成功！周记摘要: ${weeklyResult.reply.trim().substring(0, 150)}...`)
+            console.log(`[周记生成] 周记 ID: ${newWeekly.id}`)
+          }
+        } catch (err) {
+          console.error(`[周记生成] 失败:`, err.message)
+        }
+        
+        console.log(`[周记生成] ===== 周记生成完成 =====\n`)
+      }
     }
     
   } catch (err) {

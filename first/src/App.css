@@ -4839,6 +4839,40 @@ select.ai-form-input option:first-child {
   font-weight: 500;
 }
 
+/* 周记样式 */
+.weekly-header {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(236, 72, 153, 0.1) 100%);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  margin: -1px -1px 0 -1px;
+  padding: 12px 16px;
+}
+
+.weekly-icon {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%);
+  border-radius: var(--radius-md);
+  color: white;
+}
+
+.weekly-badge {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(236, 72, 153, 0.15) 100%);
+  color: #8b5cf6;
+}
+
+.diary-card.weekly-card {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.04) 0%, rgba(236, 72, 153, 0.04) 100%);
+  border-color: rgba(139, 92, 246, 0.2);
+}
+
+.diary-card.weekly-card:hover {
+  border-color: rgba(139, 92, 246, 0.4);
+  box-shadow: 0 4px 20px rgba(139, 92, 246, 0.15);
+}
+
 .diary-card-title {
   font-size: 16px;
   font-weight: 600;

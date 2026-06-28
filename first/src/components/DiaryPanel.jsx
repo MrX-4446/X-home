@@ -297,20 +297,22 @@ function DiaryPanel({ onClose }) {
     }
   }, [showDetail, showEditor])
 
-  // 加载所有日记（通过 source=daily_diary 过滤）
+  // 加载所有日记和周记
   const loadDiaries = async () => {
     setIsLoading(true)
     try {
-      // 获取 daily_diary 和 manual_diary 两种来源的日记
-      const [resAuto, resManual, statusRes] = await Promise.all([
+      // 获取 daily_diary（AI日记）、manual_diary（手动日记）、weekly_diary（周记）三种来源
+      const [resAuto, resManual, resWeekly, statusRes] = await Promise.all([
         api.get('/api/memories?source=daily_diary'),
         api.get('/api/memories?source=manual_diary'),
+        api.get('/api/memories?source=weekly_diary'),
         getDiaryStatus(),
       ])
       const autoDiaries = resAuto.data || []
       const manualDiaries = resManual.data || []
+      const weeklyDiaries = resWeekly.data || []
       // 合并并按时间倒序
-      const all = [...autoDiaries, ...manualDiaries].sort(
+      const all = [...autoDiaries, ...manualDiaries, ...weeklyDiaries].sort(
         (a, b) => new Date(b.created_at) - new Date(a.created_at)
       )
       setDiaries(all)
@@ -361,6 +363,15 @@ function DiaryPanel({ onClose }) {
   // 按日期分组并筛选月份
   const getFilteredDiaries = () => {
     const filtered = diaries.filter(d => {
+      // 周记特殊处理：从周起始日期标签提取月份
+      if (d.source === 'weekly_diary') {
+        const weekTag = d.tags?.find(t => t.startsWith('周始于:'))
+        if (weekTag) {
+          const weekDate = weekTag.replace('周始于:', '')
+          return weekDate.startsWith(selectedMonth)
+        }
+      }
+      // 普通日记处理
       const dateTag = d.tags && d.tags.find(t => /^\d{4}-\d{2}-\d{2}$/.test(t))
       const dateStr = dateTag || (d.created_at ? d.created_at.split('T')[0] : getBeijingDateStr())
       return dateStr.startsWith(selectedMonth)
@@ -368,20 +379,36 @@ function DiaryPanel({ onClose }) {
     // 按日期分组
     const groups = {}
     filtered.forEach(d => {
-      const dateTag = d.tags && d.tags.find(t => /^\d{4}-\d{2}-\d{2}$/.test(t))
-      const dateStr = dateTag || (d.created_at ? d.created_at.split('T')[0] : getBeijingDateStr())
-      if (!groups[dateStr]) groups[dateStr] = []
-      groups[dateStr].push(d)
+      if (d.source === 'weekly_diary') {
+        // 周记用特殊分组键
+        const weekTag = d.tags?.find(t => t.startsWith('周始于:'))
+        const groupKey = weekTag ? `weekly-${weekTag.replace('周始于:', '')}` : `weekly-${d.id}`
+        if (!groups[groupKey]) groups[groupKey] = []
+        groups[groupKey].push(d)
+      } else {
+        // 普通日记
+        const dateTag = d.tags && d.tags.find(t => /^\d{4}-\d{2}-\d{2}$/.test(t))
+        const dateStr = dateTag || (d.created_at ? d.created_at.split('T')[0] : getBeijingDateStr())
+        if (!groups[dateStr]) groups[dateStr] = []
+        groups[dateStr].push(d)
+      }
     })
-    // 按日期倒序排列
-    return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]))
+    // 按日期倒序排列，周记排在前面
+    return Object.entries(groups).sort((a, b) => {
+      const aIsWeekly = a[0].startsWith('weekly-')
+      const bIsWeekly = b[0].startsWith('weekly-')
+      if (aIsWeekly && !bIsWeekly) return -1 // 周记排在前面
+      if (!aIsWeekly && bIsWeekly) return 1
+      return b[0].localeCompare(a[0]) // 同类按日期倒序
+    })
   }
 
   // 从日记中提取心情图标
   const getMoodFromDiary = (diary) => {
     const valence = diary.valence || 0.5
     const arousal = diary.arousal || 0.3
-    if (diary.source === 'daily_diary') return DiaryIcon // AI自动生成
+    if (diary.source === 'weekly_diary') return BookIcon // 周记用书本图标
+    if (diary.source === 'daily_diary') return DiaryIcon // AI自动生成的日记
     // 根据 valence/arousal 匹配心情
     if (valence > 0.7 && arousal > 0.6) return ExcitedIcon
     if (valence > 0.7 && arousal > 0.3) return HappyIcon
@@ -630,10 +657,64 @@ function DiaryPanel({ onClose }) {
                 </button>
               </div>
             ) : (
-              filteredGroups.map(([dateStr, dateDiaries]) => {
-                const dateInfo = formatDateDisplay(dateStr)
+              filteredGroups.map(([groupKey, dateDiaries]) => {
+                const isWeekly = groupKey.startsWith('weekly-')
+                // 处理周记的日期显示
+                if (isWeekly) {
+                  const weekTag = dateDiaries[0]?.tags?.find(t => t.startsWith('周始于:'))
+                  const weekDateStr = weekTag ? weekTag.replace('周始于:', '') : ''
+                  const weekDate = weekDateStr ? new Date(weekDateStr + 'T12:00:00.000Z') : null
+                  const weekEnd = weekDate ? new Date(weekDate.getTime() + 6 * 24 * 60 * 60 * 1000) : null
+                  const weekLabel = weekDate && weekEnd 
+                    ? `${weekDate.getUTCMonth() + 1}.${weekDate.getUTCDate()} - ${weekEnd.getUTCMonth() + 1}.${weekEnd.getUTCDate()}`
+                    : '本周'
+                  
+                  return (
+                    <div key={groupKey} className="diary-date-group weekly-group">
+                      <div className="diary-date-header weekly-header">
+                        <div className="weekly-icon"><BookIcon /></div>
+                        <div className="date-info">
+                          <div className="date-month">周记</div>
+                          <div className="date-weekday">{weekLabel}</div>
+                        </div>
+                      </div>
+                      <div className="diary-cards">
+                        {dateDiaries.map(diary => {
+                          const { title, body } = parseDiaryContent(diary.content)
+                          const mood = getMoodFromDiary(diary)
+                          const customTags = getCustomTags(diary)
+                          return (
+                            <div
+                              key={diary.id}
+                              className="diary-card weekly-card"
+                              onClick={() => openDetail(diary)}
+                            >
+                              <div className="diary-card-header">
+                                <span className="diary-mood"><mood /></span>
+                                <span className="diary-auto-badge weekly-badge">✨ 周记</span>
+                              </div>
+                              {title && <h3 className="diary-card-title">{title}</h3>}
+                              <p className="diary-card-preview">{getSummary(body, title ? 120 : 150)}</p>
+                              {customTags.length > 0 && (
+                                <div className="diary-card-tags">
+                                  {customTags.slice(0, 3).map(tag => (
+                                    <span key={tag} className="diary-tag-chip">#{tag}</span>
+                                  ))}
+                                  {customTags.length > 3 && <span className="diary-tag-more">+{customTags.length - 3}</span>}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                }
+                
+                // 普通日记
+                const dateInfo = formatDateDisplay(groupKey)
                 return (
-                  <div key={dateStr} className="diary-date-group">
+                  <div key={groupKey} className="diary-date-group">
                     <div className="diary-date-header">
                       <div className="date-big">{dateInfo.day}</div>
                       <div className="date-info">
@@ -807,23 +888,27 @@ function DiaryPanel({ onClose }) {
               const mood = getMoodFromDiary(selectedDiary)
               const customTags = getCustomTags(selectedDiary)
               const isAuto = selectedDiary.source === 'daily_diary'
+              const isWeekly = selectedDiary.source === 'weekly_diary'
 
               return (
                 <>
                   <div className="detail-header">
-                    <span className="detail-mood"><mood /></span>
-                    <div className="detail-date-info">
-                      <h2 className="detail-date">{dateInfo.full}</h2>
-                      {selectedDiary.created_at && (
-                        <span className="detail-time">
-                          {new Date(selectedDiary.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      )}
+                      <span className="detail-mood"><mood /></span>
+                      <div className="detail-date-info">
+                        <h2 className="detail-date">{isWeekly ? '周记' : dateInfo.full}</h2>
+                        {selectedDiary.created_at && (
+                          <span className="detail-time">
+                            {isWeekly 
+                              ? new Date(selectedDiary.created_at).toLocaleDateString('zh-CN')
+                              : new Date(selectedDiary.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+                            }
+                          </span>
+                        )}
+                      </div>
+                      {isAuto && <span className="diary-auto-badge">{isWeekly ? '✨ 周记' : 'AI 整理'}</span>}
                     </div>
-                    {isAuto && <span className="diary-auto-badge">AI 整理</span>}
-                  </div>
 
-                  {title && <h1 className="detail-title">{title}</h1>}
+                    {title && <h1 className="detail-title">{title}</h1>}
 
                   <div className="detail-content">
                     {body.split('\n').map((line, i) => (
