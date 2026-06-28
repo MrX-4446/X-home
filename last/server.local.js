@@ -2004,9 +2004,11 @@ async function compileDailyDiary(dateStr = null) {
       if (!m.is_active) return false
       if (m.source === 'daily_diary' || m.source === 'manual_diary') return false
       
+      // 正确计算北京时间的日期字符串
       const memDate = new Date(m.created_at || m.date)
+      // 转换为北京时间（UTC+8）并获取日期部分
       const memBeijingTime = new Date(memDate.getTime() + 8 * 60 * 60 * 1000)
-      const memDateStr = `${memBeijingTime.getUTCFullYear()}-${String(memBeijingTime.getUTCMonth() + 1).padStart(2, '0')}-${String(memBeijingTime.getUTCDate()).padStart(2, '0')}`
+      const memDateStr = memBeijingTime.toISOString().split('T')[0]
       
       return memDateStr === targetDateStr
     })
@@ -2052,7 +2054,7 @@ ${memoriesText}
         is_active: true,
         is_pinned: true, // 日记默认置顶
         is_resolved: false,
-        importance: 8, // 日记重要性更高
+        importance: 6, // 日记重要性更高
         valence: 0.7,
         arousal: 0.4,
         activation_count: 1,
@@ -2067,19 +2069,20 @@ ${memoriesText}
       // 日记已经总结了当天的内容，原始压缩记忆等中间产物不需要继续浮现
       let archivedCount = 0
       const updatedMemories = allMemories.map(m => {
+        // 🔒 关键修复：跳过所有日记（AI 自动生成和手动写的），双重保险防止日记被归档
+        if (m.source === 'daily_diary' || m.source === 'manual_diary') return m
         // 跳过新创建的日记本身
         if (m.id === newDiary.id) return m
         // 跳过已归档的
         if (!m.is_active) return m
         // 跳过置顶的（用户特意保留的）
         if (m.is_pinned) return m
-        // 跳过手动日记（用户自己写的）
-        if (m.source === 'manual_diary') return m
         
         // 检查是否是今天参与整理的记忆
         const memDate = new Date(m.created_at || m.date)
+        // 正确计算北京时间的日期
         const memBeijingTime = new Date(memDate.getTime() + 8 * 60 * 60 * 1000)
-        const memDateStr = `${memBeijingTime.getUTCFullYear()}-${String(memBeijingTime.getUTCMonth() + 1).padStart(2, '0')}-${String(memBeijingTime.getUTCDate()).padStart(2, '0')}`
+        const memDateStr = memBeijingTime.toISOString().split('T')[0]
         
         if (memDateStr === targetDateStr) {
           // 归档：压缩记忆必须归档，其他当天非置顶记忆也归档
@@ -2132,7 +2135,7 @@ async function checkAndBackfillMissingDiaries() {
   })
   
   const todayStr = getBeijingDateStr()
-  const todayDate = new Date(todayStr)
+  const todayDate = new Date(todayStr + 'T12:00:00.000Z') // 使用中午时间避免时区问题
   let checkDate = new Date(todayDate)
   checkDate.setDate(checkDate.getDate() - 1)
   
@@ -2140,7 +2143,8 @@ async function checkAndBackfillMissingDiaries() {
   const maxBackfillDays = 30
   
   for (let i = 0; i < maxBackfillDays; i++) {
-    const checkDateStr = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`
+    // 使用 getUTC* 方法获取正确的日期（因为我们用的是中午 UTC 时间）
+    const checkDateStr = `${checkDate.getUTCFullYear()}-${String(checkDate.getUTCMonth() + 1).padStart(2, '0')}-${String(checkDate.getUTCDate()).padStart(2, '0')}`
     
     if (existingDiaryDates.has(checkDateStr)) {
       console.log(`[日记补生成] ${checkDateStr} 已有日记，跳过`)
