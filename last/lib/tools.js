@@ -149,31 +149,23 @@ async function executeToolCall(toolCall, enabledTools) {
 
     if (toolName === '天气查询') {
       const city = String(args.city || args.query || '')
-      // 模拟天气数据（实际项目中可接入真实天气API）
-      const weatherData = {
-        '北京': { temp: '22°C', weather: '晴', humidity: '45%', wind: '北风 3级' },
-        '上海': { temp: '26°C', weather: '多云', humidity: '65%', wind: '东南风 2级' },
-        '广州': { temp: '30°C', weather: '小雨', humidity: '80%', wind: '南风 4级' },
-        '深圳': { temp: '28°C', weather: '多云', humidity: '72%', wind: '东风 3级' },
+      // 接入真实天气 API（wttr.in，免费、无需 Key）
+      const weather = await executeWeather(city)
+      if (weather.success) {
+        return { ok: true, name: toolName, input: city, output: weather.result }
       }
-      const data = weatherData[city] || { temp: '25°C', weather: '晴', humidity: '50%', wind: '微风' }
-      const result = `${city}天气：${data.weather}\n温度：${data.temp}\n湿度：${data.humidity}\n风力：${data.wind}`
-      return { ok: true, name: toolName, input: city, output: result }
+      return { ok: false, name: toolName, input: city, error: weather.error }
     }
 
     if (toolName === '翻译') {
       const text = String(args.text || args.query || '')
       const targetLang = String(args.target_lang || '中文')
-      // 简单模拟翻译（实际项目中可接入翻译API）
-      const translations = {
-        'hello': '你好',
-        'world': '世界',
-        'goodbye': '再见',
-        '你好': 'hello',
-        '再见': 'goodbye',
+      // 接入真实翻译 API（MyMemory，免费、无需 Key、国内可直连）
+      const translation = await executeTranslate(text, targetLang)
+      if (translation.success) {
+        return { ok: true, name: toolName, input: text, output: translation.result }
       }
-      const translated = translations[text.toLowerCase()] || `[${targetLang}翻译] ${text}`
-      return { ok: true, name: toolName, input: text, output: translated }
+      return { ok: false, name: toolName, input: text, error: translation.error }
     }
 
     if (toolName === '代码执行') {
@@ -199,12 +191,12 @@ async function executeToolCall(toolCall, enabledTools) {
 
     if (toolName === '网页搜索') {
       const query = String(args.query || '')
-      return {
-        ok: true,
-        name: toolName,
-        input: query,
-        output: `搜索"${query}"的结果（模拟）：\n相关信息已找到，包含多个来源的摘要信息。建议结合已知知识进行回答。`
+      // 接入真实搜索 API（SearXNG，免 Key、与模型厂商解耦，换模型也能用）
+      const search = await executeSearch(query)
+      if (search.success) {
+        return { ok: true, name: toolName, input: query, output: search.result }
       }
+      return { ok: false, name: toolName, input: query, error: search.error }
     }
 
     // 默认工具响应
@@ -327,27 +319,67 @@ function getLangCode(lang) {
 }
 
 async function executeSearch(query) {
+  if (!query) {
+    return { success: false, error: '搜索关键词为空' }
+  }
+
+  // API Key 从环境变量注入，禁止硬编码（参见 .env 中的 BOCHA_API_KEY）
+  const apiKey = process.env.BOCHA_API_KEY
+  if (!apiKey) {
+    return { success: false, error: '未配置 BOCHA_API_KEY，请在 .env 中设置博查搜索 API Key' }
+  }
+
   try {
-    const searchUrl = `https://api.bing.microsoft.com/v7.0/search?q=${encodeURIComponent(query)}&count=5`
-    const response = await fetch(searchUrl, {
+    // 博查 Web Search API：国内直连、结果质量高，且与模型厂商解耦（换模型也能用）
+    const response = await fetch('https://api.bochaai.com/v1/web-search', {
+      method: 'POST',
       headers: {
-        'Ocp-Apim-Subscription-Key': process.env.BING_API_KEY || 'mock-key'
-      }
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query,
+        count: 5,       // 返回结果条数
+        summary: true,  // 返回长文本摘要，便于模型理解
+      }),
     })
 
     if (!response.ok) {
-      return { success: false, error: '搜索 API 调用失败' }
+      // 透传博查返回的具体错误信息，便于排查（如额度不足、Key 无效等）
+      let detail = ''
+      try {
+        const errBody = await response.json()
+        detail = errBody.message || errBody.msg || JSON.stringify(errBody)
+      } catch {
+        detail = await response.text().catch(() => '')
+      }
+      // 针对常见状态码给出更明确的中文提示
+      const hint = {
+        401: 'BOCHA_API_KEY 无效或未授权',
+        403: '账户余额/套餐额度不足，请前往 open.bochaai.com 充值或领取额度',
+        429: '请求过于频繁，已触发限流',
+      }[response.status]
+      const msg = hint ? `${hint}` : '搜索 API 调用失败'
+      return { success: false, error: `${msg}（HTTP ${response.status}${detail ? '：' + detail : ''}）` }
     }
 
     const data = await response.json()
-    const results = data.webPages?.value?.slice(0, 3) || []
+    // 兼容两种响应结构：部分返回体外层包了一层 data
+    const webPages = (data.data?.webPages || data.webPages)
+    const results = (webPages?.value || []).slice(0, 5)
+
+    if (results.length === 0) {
+      return { success: false, error: '未找到相关结果' }
+    }
 
     let summary = ''
     results.forEach((item, index) => {
-      summary += `${index + 1}. ${item.name}\n${item.snippet}\n${item.url}\n\n`
+      // 优先用 summary（AI 摘要），无则退回 snippet
+      const desc = item.summary || item.snippet || ''
+      summary += `${index + 1}. ${item.name || ''}\n${desc}\n${item.url || ''}\n\n`
     })
 
-    return { success: true, result: summary || '未找到相关结果' }
+    return { success: true, result: summary.trim() }
   } catch (e) {
     return { success: false, error: '搜索失败: ' + e.message }
   }
@@ -388,10 +420,17 @@ async function executeWeather(city) {
 
 async function executeTranslate(text, target) {
   try {
-    const langs = { '英语': 'en', '日语': 'ja', '韩语': 'ko', '中文': 'zh', '法语': 'fr', '德语': 'de', '西班牙语': 'es' }
-    const targetLang = langs[target] || 'en'
+    const langs = { '英语': 'en', '英文': 'en', '日语': 'ja', '日文': 'ja', '韩语': 'ko', '韩文': 'ko', '中文': 'zh-CN', '中': 'zh-CN', '法语': 'fr', '德语': 'de', '西班牙语': 'es', '俄语': 'ru' }
+    const targetLang = langs[target] || 'zh-CN'
 
-    const translateUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`
+    // 自动判断源语言：含中文字符则源为中文，否则默认英文
+    const hasChinese = /[\u4e00-\u9fa5]/.test(text)
+    let sourceLang = hasChinese ? 'zh-CN' : 'en'
+    // 若源语言与目标语言相同（例如中译中），把源改成英文以避免无效翻译
+    if (sourceLang === targetLang) sourceLang = hasChinese ? 'en' : 'zh-CN'
+
+    // MyMemory 免费翻译 API：无需 Key，国内可直连
+    const translateUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${sourceLang}|${targetLang}`
     const response = await fetch(translateUrl)
 
     if (!response.ok) {
@@ -399,7 +438,10 @@ async function executeTranslate(text, target) {
     }
 
     const data = await response.json()
-    const result = data[0]?.[0]?.[0] || text
+    const result = data?.responseData?.translatedText
+    if (!result) {
+      return { success: false, error: '未获取到翻译结果' }
+    }
 
     return { success: true, result }
   } catch (e) {

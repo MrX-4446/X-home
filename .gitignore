@@ -35,3 +35,7 @@ Thumbs.db
 *.tmp
 *.temp
 *.bak
+
+# ----- 调试/测试产物（本地专用，不要提交）-----
+.dbg/
+debug-message-overwrite.md
