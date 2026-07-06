@@ -28,6 +28,29 @@ function ChatArea({
   const isAutoScrollingRef = useRef(false)
   // 记录上一次消息数量，用于判断是否有新消息
   const prevMessageCountRef = useRef(0)
+  // 页面/标签页是否可见：用于判断 AI 消息是否被“看到”（已读）
+  const [isPageVisible, setIsPageVisible] = useState(!document.hidden)
+
+  useEffect(() => {
+    const handleVisibility = () => setIsPageVisible(!document.hidden)
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => document.removeEventListener('visibilitychange', handleVisibility)
+  }, [])
+
+  // 计算某条消息的已读/未读状态（模拟真实聊天语义）
+  // - 用户消息：其后存在 AI 回复 → 已读；否则 → 未读（送达未读）
+  // - AI 消息：用户正在看该会话（页面可见）→ 已读；页面不可见且是最新消息 → 未读
+  const getMessageStatus = (message, index, messages) => {
+    if (message.role === 'user') {
+      const hasLaterAssistant = messages.slice(index + 1).some(m => m.role === 'assistant')
+      return hasLaterAssistant ? 'read' : 'unread'
+    }
+    if (message.role === 'assistant') {
+      if (isPageVisible) return 'read'
+      return index === messages.length - 1 ? 'unread' : 'read'
+    }
+    return null
+  }
 
   // 判断是否滚动到底部（阈值 30px，兼容轻微的滚动偏差）
   const checkIsAtBottom = () => {
@@ -130,8 +153,8 @@ function ChatArea({
             开始新的对话吧！
           </div>
         ) : (
-          chat.messages.map(message => (
-            <Message key={message.id} message={message} />
+          chat.messages.map((message, index) => (
+            <Message key={message.id} message={message} status={getMessageStatus(message, index, chat.messages)} />
           ))
         )}
         {isTyping && <TypingIndicator />}

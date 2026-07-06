@@ -60,6 +60,11 @@ const {
   setupDailyDiaryTask,
 } = require('./lib/memory/diary')
 
+// AI 主动消息层（后端定时任务：随机想念）已抽离到 lib/memory/proactive.js
+const {
+  setupProactiveTask,
+} = require('./lib/memory/proactive')
+
 function generateMessageId(baseTime, index) {
   return `msg-${baseTime}-${index}-${Math.random().toString(36).slice(2, 8)}`
 }
@@ -950,6 +955,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('  GET  /api/diary/status     (查看日记状态)')
   
   setupDailyDiaryTask()
+  setupProactiveTask()
   
   setTimeout(() => {
     checkAndBackfillMissingDiaries().catch(err => {

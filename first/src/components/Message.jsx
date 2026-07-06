@@ -51,15 +51,22 @@ function ToolCallTimeline({ toolResults }) {
   )
 }
 
-function Message({ message }) {
+function Message({ message, status }) {
   const { text, toolResults } = parseMessageContent(message.content)
 
   return (
     <div className={`message ${message.role}`}>
       <div className="message-content">{text}</div>
       {toolResults.length > 0 && <ToolCallTimeline toolResults={toolResults} />}
-      <div className="message-time">
-        {message.created_at ? new Date(message.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : message.time}
+      <div className="message-meta">
+        <span className="message-time">
+          {message.created_at ? new Date(message.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : message.time}
+        </span>
+        {status && (
+          <span className={`message-status ${status === 'read' ? 'is-read' : 'is-unread'}`}>
+            {status === 'read' ? '已读' : '未读'}
+          </span>
+        )}
       </div>
     </div>
   )

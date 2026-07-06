@@ -78,6 +78,8 @@ function App() {
     top_p: '0.9',
   })
   const messagesEndRef = useRef(null)
+  // 记录已展示过的 AI 主动消息 id，避免轮询重复提示
+  const seenProactiveRef = useRef(new Set())
 
   const currentChat = chats.find(chat => chat.id === currentChatId)
 
@@ -157,6 +159,51 @@ function App() {
         : chat
     ))
   }
+
+  // ===== AI 主动消息轮询 =====
+  // 后端定时任务会主动写入 role='assistant' 且 proactive=true 的消息，
+  // 前端定期拉取当前会话消息，发现新的主动消息就刷新界面并弹浏览器通知。
+  useEffect(() => {
+    if (!currentChatId) return
+
+    // 首次进入会话时，把已存在的主动消息 id 记为“已见”，避免历史消息触发通知
+    getMessages(currentChatId).then(msgs => {
+      (msgs || []).forEach(m => {
+        if (m.proactive) seenProactiveRef.current.add(m.id)
+      })
+    })
+
+    const timer = setInterval(async () => {
+      const msgs = await getMessages(currentChatId)
+      if (!msgs || msgs.length === 0) return
+
+      const newProactive = msgs.filter(m => m.proactive && !seenProactiveRef.current.has(m.id))
+      if (newProactive.length === 0) return
+
+      newProactive.forEach(m => seenProactiveRef.current.add(m.id))
+
+      // 刷新当前会话消息，让主动消息显示出来
+      setChats(prev => prev.map(chat =>
+        chat.id === currentChatId ? { ...chat, messages: msgs } : chat
+      ))
+
+      // 浏览器通知（需用户已授权）
+      const last = newProactive[newProactive.length - 1]
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        const chatName = settings.chat_name || currentChat?.chatName || '恋人X'
+        new Notification(chatName, { body: last.content })
+      }
+    }, 60 * 1000) // 每分钟轮询一次
+
+    return () => clearInterval(timer)
+  }, [currentChatId, settings.chat_name])
+
+  // 首次进入应用请求通知授权（用于 AI 主动消息提醒）
+  useEffect(() => {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {})
+    }
+  }, [])
 
   const formatTime = (dateString) => {
     if (!dateString) return '刚刚'

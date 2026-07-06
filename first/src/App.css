@@ -462,6 +462,39 @@ body {
   text-align: left;
 }
 
+.message-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+}
+
+.message.user .message-meta {
+  justify-content: flex-end;
+}
+
+.message.assistant .message-meta {
+  justify-content: flex-start;
+}
+
+.message-meta .message-time {
+  padding: 0;
+}
+
+.message-status {
+  font-size: 11px;
+  line-height: 1;
+}
+
+.message-status.is-read {
+  color: var(--text-muted);
+}
+
+.message-status.is-unread {
+  color: var(--primary-warm-gray-blue-dark);
+  font-weight: 600;
+}
+
 .tool-call-timeline {
   width: 100%;
   padding: 12px;
