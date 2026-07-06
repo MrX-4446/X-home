@@ -31,20 +31,26 @@ body {
   background-color: var(--background-soft);
   color: var(--text-primary);
   line-height: 1.6;
+  /* dvh 随移动端地址栏动态调整高度，vh 作为老浏览器回退 */
   min-height: 100vh;
+  min-height: 100dvh;
   height: 100vh;
+  height: 100dvh;
   margin: 0;
   padding: 0;
 }
 
 #root {
   min-height: 100vh;
+  min-height: 100dvh;
   height: 100vh;
+  height: 100dvh;
 }
 
 .app-container {
   display: flex;
   height: 100vh;
+  height: 100dvh;
 }
 
 /* Sidebar Styles */
@@ -1349,7 +1355,9 @@ body {
 /* Home Page Styles */
 .home-page {
   min-height: 100vh;
+  min-height: 100dvh;
   height: 100vh;
+  height: 100dvh;
   background: linear-gradient(180deg, #EDEBE9 0%, #F5F3EF 100%);
   display: flex;
   justify-content: center;
@@ -5605,6 +5613,7 @@ html {
   body {
     height: 100%;
     min-height: 100vh;
+    min-height: 100dvh;
     /* 防止移动端缩放问题 */
     touch-action: manipulation;
     -webkit-text-size-adjust: 100%;
@@ -5613,11 +5622,13 @@ html {
   #root {
     height: 100%;
     min-height: 100vh;
+    min-height: 100dvh;
   }
   
   .app-container {
     height: 100%;
     min-height: 100vh;
+    min-height: 100dvh;
   }
   
   /* 侧边栏 - 移动端默认隐藏 */
