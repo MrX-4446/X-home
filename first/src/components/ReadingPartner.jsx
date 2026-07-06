@@ -1,6 +1,56 @@
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { api, chatWithAI } from '../lib/api'
+import { api, chatWithAI, getNotes, createNote, updateNote, deleteNote as apiDeleteNote, bulkUploadNotes } from '../lib/api'
+
+// ===== 讨论上下文节选（省 token）=====
+// 短笔记直接发全文；长笔记只发「开头 + 与提问相关的片段」，总量封顶，避免整本书塞进 prompt。
+const DISCUSS_FULL_TEXT_LIMIT = 3000  // 正文不超过此字数时发送全文
+const DISCUSS_HEAD_CHARS = 500        // 长笔记固定保留的开头字数
+const DISCUSS_MAX_CHARS = 3000        // 长笔记节选总量上限
+
+// 从长文本中，围绕用户提问的关键词抽取相关段落
+function buildNoteExcerpt(content, userText) {
+  const text = String(content || '')
+  if (text.length <= DISCUSS_FULL_TEXT_LIMIT) {
+    return { excerpt: text, truncated: false }
+  }
+
+  // 按段落（空行或换行）切分
+  const paragraphs = text.split(/\n+/).map(p => p.trim()).filter(Boolean)
+
+  // 提取用户提问里的关键词（中文按 2 字以上连续片段，英文/数字按单词），过滤过短词
+  const keywords = (String(userText || '')
+    .match(/[\u4e00-\u9fa5]{2,}|[a-zA-Z0-9]{2,}/g) || [])
+    .filter(w => w.length >= 2)
+
+  const head = text.slice(0, DISCUSS_HEAD_CHARS)
+  let excerpt = head
+  const usedRanges = [] // 已选段落的原文起点，避免与开头重复
+
+  if (keywords.length > 0) {
+    // 给每个段落按命中关键词次数打分
+    const scored = paragraphs
+      .map((p, idx) => {
+        let score = 0
+        for (const kw of keywords) {
+          if (p.includes(kw)) score++
+        }
+        return { p, idx, score }
+      })
+      .filter(item => item.score > 0)
+      .sort((a, b) => b.score - a.score)
+
+    for (const item of scored) {
+      if (excerpt.length + item.p.length + 20 > DISCUSS_MAX_CHARS) break
+      // 跳过完全落在开头范围内的段落（避免重复）
+      if (usedRanges.includes(item.idx)) continue
+      excerpt += `\n……\n${item.p}`
+      usedRanges.push(item.idx)
+    }
+  }
+
+  return { excerpt, truncated: true }
+}
 
 // ===== SVG 线条图标组件 =====
 const BookIcon = ({ size = 20 }) => (
@@ -531,13 +581,16 @@ function UploadBookPage({ onBack, onClose }) {
       discussions: [],
     }
 
-    // 追加写入 localStorage（NotesPage 从这里读取）
+    // 追加写入 localStorage（离线缓存兜底）
     try {
       const saved = JSON.parse(localStorage.getItem('reading-notes') || '[]')
       localStorage.setItem('reading-notes', JSON.stringify([newNote, ...saved]))
     } catch (e) {
       console.error('写入本地笔记失败', e)
     }
+
+    // 保存到后端（上云，NotesPage 从后端读取）
+    await createNote(newNote)
 
     // 同步到记忆系统（记忆内容截断，避免过大）
     try {
@@ -900,7 +953,7 @@ function UploadBookPage({ onBack, onClose }) {
 
 // 读书笔记页面 - 完整管理功能
 function NotesPage({ onBack, onClose, selectedNote, setSelectedNote, onSendMessage }) {
-  // 从 localStorage 加载笔记数据，没有则用默认
+  // 初始先用 localStorage 里的缓存快速渲染（离线兜底），随后从后端拉取覆盖
   const loadNotesFromStorage = () => {
     try {
       const saved = localStorage.getItem('reading-notes')
@@ -915,8 +968,46 @@ function NotesPage({ onBack, onClose, selectedNote, setSelectedNote, onSendMessa
   }
 
   const [notes, setNotes] = useState(loadNotesFromStorage)
+  const [notesLoading, setNotesLoading] = useState(true) // 首次从后端加载中
 
-  // 每当 notes 变化时自动保存到 localStorage
+  // 挂载时：从后端加载笔记；若本地有后端没有的旧笔记则迁移上云
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        // 读取本地缓存（可能有历史笔记需要迁移）
+        let localNotes = []
+        try {
+          localNotes = JSON.parse(localStorage.getItem('reading-notes') || '[]')
+        } catch { localNotes = [] }
+
+        const serverNotes = await getNotes()
+        const serverIds = new Set((serverNotes || []).map(n => String(n.id)))
+
+        // 找出本地有、后端没有的笔记 -> 首次迁移上云
+        const toMigrate = (localNotes || []).filter(n => n && n.id !== undefined && !serverIds.has(String(n.id)))
+        if (toMigrate.length > 0) {
+          const merged = await bulkUploadNotes(toMigrate)
+          if (!cancelled && Array.isArray(merged)) {
+            setNotes(merged)
+            setNotesLoading(false)
+            return
+          }
+        }
+
+        if (!cancelled) {
+          setNotes(serverNotes || [])
+          setNotesLoading(false)
+        }
+      } catch (e) {
+        console.error('从后端加载笔记失败，使用本地缓存', e)
+        if (!cancelled) setNotesLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  // 每当 notes 变化时同步写入 localStorage（作为离线缓存兜底）
   useEffect(() => {
     try {
       localStorage.setItem('reading-notes', JSON.stringify(notes))
@@ -1009,12 +1100,16 @@ function NotesPage({ onBack, onClose, selectedNote, setSelectedNote, onSendMessa
   const deleteTag = () => {
     if (!contextMenu) return
     const { noteId, tag } = contextMenu
+    const target = notes.find(n => n.id === noteId)
+    const newTags = (target?.tags || []).filter(t => t !== tag)
     setNotes(prev => prev.map(note => 
       note.id === noteId 
-        ? { ...note, tags: (note.tags || []).filter(t => t !== tag) }
+        ? { ...note, tags: newTags }
         : note
     ))
     setContextMenu(null)
+    // 同步到后端
+    updateNote(noteId, { tags: newTags })
   }
 
   // 打开添加标签对话框
@@ -1028,14 +1123,19 @@ function NotesPage({ onBack, onClose, selectedNote, setSelectedNote, onSendMessa
   const addTagToNote = () => {
     if (!newTagInput.trim() || !addingTagToNoteId) return
     const tag = newTagInput.trim()
+    const target = notes.find(n => n.id === addingTagToNoteId)
+    const newTags = [...new Set([...(target?.tags || []), tag])]
+    const targetId = addingTagToNoteId
     setNotes(prev => prev.map(note => 
       note.id === addingTagToNoteId 
-        ? { ...note, tags: [...new Set([...(note.tags || []), tag])] }
+        ? { ...note, tags: newTags }
         : note
     ))
     setShowAddTagModal(false)
     setAddingTagToNoteId(null)
     setNewTagInput('')
+    // 同步到后端
+    updateNote(targetId, { tags: newTags })
   }
 
   // 将笔记同步到记忆系统
@@ -1193,6 +1293,9 @@ function NotesPage({ onBack, onClose, selectedNote, setSelectedNote, onSendMessa
     if (selectedNote?.id === noteId) {
       setSelectedNote(null)
     }
+
+    // 同步删除后端笔记
+    await apiDeleteNote(noteId)
   }
 
   // 创建新笔记
@@ -1217,6 +1320,8 @@ function NotesPage({ onBack, onClose, selectedNote, setSelectedNote, onSendMessa
     setNewNoteChapter('')
     setNewNoteContent('')
 
+    // 保存到后端（上云）
+    await createNote(newNote)
     // 自动同步到记忆系统
     await syncNoteToMemory(newNote)
   }
@@ -1241,6 +1346,9 @@ function NotesPage({ onBack, onClose, selectedNote, setSelectedNote, onSendMessa
     ))
     setShowEditModal(false)
     setEditingNote(null)
+
+    // 同步更新后端笔记
+    await updateNote(updatedNote.id, { note: updatedNote.note, time: updatedNote.time })
     
     // 编辑前先删除旧的关联记忆（避免重复）
     const oldMemoryIds = noteMemoryIds[editingNote.id] || []
@@ -1298,12 +1406,21 @@ function NotesPage({ onBack, onClose, selectedNote, setSelectedNote, onSendMessa
       .map(d => ({ role: d.role === 'assistant' ? 'assistant' : 'user', content: d.content }))
       .slice(-20)
 
+    // 笔记正文可能是整本书，直接全塞进 prompt 会浪费大量 token。
+    // 短笔记发全文；长笔记只发「开头 + 与提问相关的片段」，并明确告知 AI 这是节选。
+    const { excerpt, truncated } = buildNoteExcerpt(note.content, userText)
+    const contentBlock = truncated
+      ? `原文内容（⚠️ 这是全书节选，仅包含开头与你提问相关的片段，其余内容未提供）：
+「${excerpt}」
+【重要】以上仅为节选，未出现的内容你并不知道，绝不要臆测或编造原文没有的情节、观点或细节；若我问的内容不在节选中，请如实说明你没有读到那部分。`
+      : `原文内容：
+「${excerpt}」`
+
     // 笔记上下文前缀：书名、章节、原文、我的想法
     const noteContext = `【我们正在讨论一则读书笔记，请你先仔细阅读以下笔记内容，再回应我】
 书籍：《${note.book}》${note.chapter ? `\n章节：${note.chapter}` : ''}
 笔记类型：${noteTypeConfig[note.type]?.label || ''}
-原文内容：
-「${note.content}」${note.note ? `\n我的想法：${note.note}` : ''}
+${contentBlock}${note.note ? `\n我的想法：${note.note}` : ''}
 
 请基于上面这则笔记的真实内容和我讨论，不要脱离原文凭空发挥，不确定的内容不要编造。下面是我要说的话：
 ${userText}`
@@ -1335,6 +1452,10 @@ ${userText}`
         : n
     ))
     setDiscussLoading(false)
+
+    // 同步讨论记录到后端（把用户消息 + AI 回复一起持久化）
+    const updatedDiscussions = [...(note.discussions || []), newDiscussion, aiReply]
+    await updateNote(noteId, { discussions: updatedDiscussions })
 
     // 同步 AI 回复到记忆系统
     await syncNoteToMemory(note, true, `AI: ${aiReply.content}`)

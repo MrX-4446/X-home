@@ -822,6 +822,74 @@ ${messagesText}
       return sendJson(res, 200, { data: memories[index] || null })
     }
 
+    // ===== 读书笔记 API（阅读伙伴上云，存 reading-notes.json） =====
+    if (pathname === '/api/notes' && req.method === 'GET') {
+      const notes = readStorage('reading-notes') || []
+      return sendJson(res, 200, { data: notes })
+    }
+
+    if (pathname === '/api/notes' && req.method === 'POST') {
+      const body = await readBody(req)
+      if (!body || !body.content) {
+        return sendJson(res, 400, { error: '缺少笔记内容' })
+      }
+      const notes = readStorage('reading-notes') || []
+      // 前端已生成完整 note 结构，这里原样保存（保证 id 一致，便于后续更新/删除）
+      const newNote = {
+        ...body,
+        id: body.id || Date.now(),
+        created_at: body.created_at || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+      // 若已存在同 id，则更新而非重复插入
+      const existIndex = notes.findIndex(n => String(n.id) === String(newNote.id))
+      if (existIndex !== -1) {
+        notes[existIndex] = { ...notes[existIndex], ...newNote }
+      } else {
+        notes.unshift(newNote)
+      }
+      writeStorage('reading-notes', notes)
+      return sendJson(res, 200, { data: newNote })
+    }
+
+    // 批量替换（用于首次迁移：前端把 localStorage 的笔记整体上传）
+    if (pathname === '/api/notes/bulk' && req.method === 'POST') {
+      const body = await readBody(req)
+      const incoming = Array.isArray(body.notes) ? body.notes : []
+      const notes = readStorage('reading-notes') || []
+      const existIds = new Set(notes.map(n => String(n.id)))
+      let added = 0
+      incoming.forEach(n => {
+        if (n && n.id !== undefined && !existIds.has(String(n.id))) {
+          notes.unshift({ ...n, created_at: n.created_at || new Date().toISOString(), updated_at: new Date().toISOString() })
+          existIds.add(String(n.id))
+          added++
+        }
+      })
+      writeStorage('reading-notes', notes)
+      return sendJson(res, 200, { data: notes, added })
+    }
+
+    if (pathname.match(/\/api\/notes\/.+/) && req.method === 'PATCH') {
+      const noteId = pathname.split('/')[3]
+      const updates = await readBody(req)
+      const notes = readStorage('reading-notes') || []
+      const index = notes.findIndex(n => String(n.id) === String(noteId))
+      if (index !== -1) {
+        notes[index] = { ...notes[index], ...updates, id: notes[index].id, updated_at: new Date().toISOString() }
+        writeStorage('reading-notes', notes)
+      }
+      return sendJson(res, 200, { data: notes[index] || null })
+    }
+
+    if (pathname.match(/\/api\/notes\/.+/) && req.method === 'DELETE') {
+      const noteId = pathname.split('/')[3]
+      const notes = readStorage('reading-notes') || []
+      const filtered = notes.filter(n => String(n.id) !== String(noteId))
+      writeStorage('reading-notes', filtered)
+      return sendJson(res, 200, { ok: true })
+    }
+
     // ===== 日记管理 API =====
     if (pathname === '/api/diary/compile' && req.method === 'POST') {
       const body = await readBody(req)

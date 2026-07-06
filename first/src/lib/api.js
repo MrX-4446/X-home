@@ -435,6 +435,68 @@ export async function getDiaryStatus() {
   }
 }
 
+// ===== 读书笔记 API（阅读伙伴上云）=====
+
+export async function getNotes() {
+  try {
+    const res = await request('/api/notes')
+    return res?.data || []
+  } catch (err) {
+    console.error('获取读书笔记失败:', err)
+    return []
+  }
+}
+
+export async function createNote(note) {
+  try {
+    const res = await request('/api/notes', {
+      method: 'POST',
+      body: JSON.stringify(note),
+    })
+    return res?.data || null
+  } catch (err) {
+    console.error('创建读书笔记失败:', err)
+    return null
+  }
+}
+
+export async function updateNote(noteId, updates) {
+  try {
+    const res = await request(`/api/notes/${noteId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    })
+    return res?.data || null
+  } catch (err) {
+    console.error('更新读书笔记失败:', err)
+    return null
+  }
+}
+
+export async function deleteNote(noteId) {
+  try {
+    await request(`/api/notes/${noteId}`, { method: 'DELETE' })
+    return true
+  } catch (err) {
+    console.error('删除读书笔记失败:', err)
+    return false
+  }
+}
+
+// 批量上传（首次迁移 localStorage 里的旧笔记）
+export async function bulkUploadNotes(notes) {
+  try {
+    const res = await request('/api/notes/bulk', {
+      method: 'POST',
+      body: JSON.stringify({ notes }),
+    })
+    return res?.data || []
+  } catch (err) {
+    console.error('批量上传读书笔记失败:', err)
+    return null
+  }
+}
+
 export const api = {
   get: (path) => request(path),
   post: (path, body) => request(path, { method: 'POST', body: JSON.stringify(body) }),
