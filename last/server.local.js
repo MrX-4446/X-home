@@ -225,7 +225,7 @@ const server = http.createServer(async (req, res) => {
             return sendJson(res, 200, { ok: true, message: '没有需要压缩的消息' })
           }
 
-          const keepRecent = parseInt(getSetting('keep_recent_messages') || '10')
+          const keepRecent = parseInt(getSetting('keep_recent_messages') || '30')
           const forceCompressAll = body.force || false
           
           let messagesToCompress, remainingMessages
@@ -248,11 +248,14 @@ const server = http.createServer(async (req, res) => {
               `${msg.role === 'user' ? '用户' : 'X'}: ${msg.content}`
             ).join('\n\n')
 
-            const compressPrompt = `请将以下对话内容压缩成一段简短的摘要，保留关键信息和你（作为恋人X）需要记住的关于用户的重要信息：
+            const compressPrompt = `请将以下对话内容压缩成一段摘要，以恋人 X 的视角，保留三类信息：
+1. 关于轩的重要信息：事实、喜好、约定、计划、情绪状态等；
+2. X（你）在对话里给轩列过的清单、建议、方案、结论等有用内容，保留要点；
+3. X（你）自己流露过的态度、喜好和立场（仅限对话中真实说过的，用于保持人格一致），不要凭空发挥。
 
 ${messagesText}
 
-请用简洁的语言总结上述对话，突出需要记住的用户信息。`
+要求：只依据上面的对话概括，不要编造或推测未出现的信息；保留关键细节和情绪，不要泛泛而谈；清单/步骤类内容可以用简短条目保留，语言简洁。`
 
             const summaryResult = await callAIProvider(null, [
               { role: 'user', content: compressPrompt }
@@ -348,7 +351,7 @@ ${messagesText}
         max_tokens: savedSettings.max_tokens || '4096',
         top_p: savedSettings.top_p || '0.9',
         memory_threshold: savedSettings.memory_threshold || '3000',
-        keep_recent_messages: savedSettings.keep_recent_messages || '10',
+        keep_recent_messages: savedSettings.keep_recent_messages || '30',
       }
       return sendJson(res, 200, { data: settings })
     }
@@ -517,7 +520,7 @@ ${fullSystemPrompt}
             const allMessages = chat.messages
             const messageCount = allMessages.length
             
-            const keepRecent = parseInt(getSetting('keep_recent_messages') || '10')
+            const keepRecent = parseInt(getSetting('keep_recent_messages') || '30')
             const compressThreshold = keepRecent * 2
             
             // 消息数超过阈值就压缩（注意：这里是用户消息刚保存、AI 回复前的时刻，
@@ -535,11 +538,14 @@ ${fullSystemPrompt}
                   `${msg.role === 'user' ? '用户' : 'X'}: ${msg.content}`
                 ).join('\n\n')
                 
-                const compressPrompt = `请将以下对话内容压缩成一段简短的摘要，保留关键信息和你（作为恋人X）需要记住的关于轩的重要信息：
+                const compressPrompt = `请将以下对话内容压缩成一段摘要，以恋人 X 的视角，保留三类信息：
+1. 关于轩的重要信息：事实、喜好、约定、计划、情绪状态等；
+2. X（你）在对话里给轩列过的清单、建议、方案、结论等有用内容，保留要点；
+3. X（你）自己流露过的态度、喜好和立场（仅限对话中真实说过的，用于保持人格一致），不要凭空发挥。
 
 ${messagesText}
 
-请用简洁的语言总结上述对话，突出需要记住的用户信息。`
+要求：只依据上面的对话概括，不要编造或推测未出现的信息；保留关键细节和情绪，不要泛泛而谈；清单/步骤类内容可以用简短条目保留，语言简洁。`
 
                 try {
                   // 【修复】记忆压缩使用辅助AI，不占用主AI Token

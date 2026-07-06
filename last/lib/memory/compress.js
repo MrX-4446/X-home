@@ -167,20 +167,23 @@ async function compressMemory(chatId, messagesToCompress) {
   if (messagesToCompress.length === 0) return
 
   const messagesText = messagesToCompress.map(msg => 
-    `${msg.role === 'user' ? '用户' : '助手'}: ${msg.content}`
+    `${msg.role === 'user' ? '用户' : 'X'}: ${msg.content}`
   ).join('\n\n')
 
   // ===== 【重构】统一用 callAIProvider，启用辅助AI节省Token
   console.log(`[记忆压缩] ${messagesToCompress.length} 条对话，调用AI压缩中...`)
   
-  const compressPrompt = `请将以下对话内容压缩成一段简短的摘要，保留关键信息和要点：
+  const compressPrompt = `请将以下对话内容压缩成一段摘要，以恋人 X 的视角，保留三类信息：
+1. 关于用户的重要信息：事实、喜好、约定、计划、情绪状态等；
+2. X（你）在对话里列过的清单、建议、方案、结论等有用内容，保留要点；
+3. X（你）自己流露过的态度、喜好和立场（仅限对话中真实说过的，用于保持人格一致），不要凭空发挥。
 
 ${messagesText}
 
-请用简洁的语言总结上述对话。`
+要求：只依据上面的对话概括，不要编造或推测未出现的信息；保留关键细节和情绪；清单/步骤类内容可以用简短条目保留，语言简洁。`
 
   const result = await callAIProvider(null, [
-    { role: 'system', content: '你是一个专业的文本摘要助手，擅长将长对话压缩成简洁的摘要。' },
+    { role: 'system', content: '你是恋人 X 的记忆整理助手，负责把对话浓缩成 X 要记住的记忆，忠于原文、不编造。' },
     { role: 'user', content: compressPrompt }
   ], { 
     useHelperAI: true, // 关键：启用辅助AI，不占主AI的Token！

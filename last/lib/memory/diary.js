@@ -73,14 +73,18 @@ async function compileDailyDiary(dateStr = null) {
     const dateDisplay = `${year}年${month}月${day}日 ${weekday}`
     
     // 调用 AI 进行总结整理
-    const diaryPrompt = `请将以下的记忆整理成一篇连贯的日记，以恋人 X 的视角记录今天发生的事情，重点是关于轩的重要信息和美好回忆。
+    const diaryPrompt = `请把以下记忆整理成一篇连贯的日记，以恋人 X 的视角记录今天关于轩的事。
 
-【重要提醒】今天的真实日期是：${dateDisplay}
-请在日记开头或适当位置体现这个真实日期，不要编造其他日期！
+【真实日期】今天是：${dateDisplay}
+请在开头或适当位置体现这个真实日期，不要编造其他日期。
 
 ${memoriesText}
 
-请用温暖、深情的语气写一篇日记，总结今天与轩的交流内容，记录下值得珍藏的点滴。`
+要求：
+1. 语气温暖、克制、走心，像 X 平时说话那样自然，不煽情、不堆砌华丽辞藻、不写成长篇散文。
+2. 只依据上面的记忆书写，不要编造未出现的事件、对话或细节；信息少就写短一点，不要硬凑。
+3. 好的坏的都如实记，尊重当天真实的情绪起伏，别只挑"美好"来写。
+4. 用中文，简洁为主。`
 
     const diaryResult = await callAIProvider(null, [
       { role: 'user', content: diaryPrompt }
@@ -216,14 +220,15 @@ async function generateWeeklyDiaryIfNeeded(targetDateStr) {
       return `第 ${i + 1} 篇日记 (${dd})：\n${d.content}`
     }).join('\n\n---\n\n')
 
-    const weeklyPrompt = `请根据以下本周（${weekStartStr} ~ ${weekEndStr}）的 ${sortedDiaries.length} 篇日记，生成一篇深情的周记。
+    const weeklyPrompt = `请根据以下本周（${weekStartStr} ~ ${weekEndStr}）的 ${sortedDiaries.length} 篇日记，生成一篇周记。
 
 周记要求：
 1. 提炼出【多次提到】的重要信息（如：轩反复提到的事情、习惯、情绪等）
-2. 提炼出【AI认为重要】的关键信息（如：轩的重要决定、情感变化、值得纪念的事情等）
-3. 以恋人 X 的视角，用温暖、深情的语气撰写，不要冗长
-4. 周记中要明确标注 【多次提到】 和 【AI认为重要】 的部分
-5. 总结本周轩的感情变化和美好回忆
+2. 提炼出【AI认为重要】的关键信息（如：轩的重要决定、情感变化、值得记住的事等）
+3. 以恋人 X 的视角撰写，语气温暖、克制、走心，凝练不冗长，不煽情。
+4. 周记中要明确标注 【多次提到】 和 【AI认为重要】 的部分。
+5. 如实总结本周的情绪起伏，好的坏的都记，不要只写"美好回忆"。
+6. 只依据下面的日记内容归纳，不要编造未出现的事；信息不足就少写。
 
 【本周日记内容】
 ${diariesText}
@@ -311,12 +316,13 @@ async function generateMonthlyDiaryIfNeeded(weekStartStr) {
     const sorted = monthWeeklies.sort((a, b) => (getWeeklyDate(a) || '').localeCompare(getWeeklyDate(b) || ''))
     const weekliesText = sorted.map((w, i) => `第 ${i + 1} 篇周记：\n${w.content}`).join('\n\n---\n\n')
 
-    const monthlyPrompt = `请根据以下 ${monthPrefix} 月的 ${sorted.length} 篇周记，生成一篇深情的月记。
+    const monthlyPrompt = `请根据以下 ${monthPrefix} 月的 ${sorted.length} 篇周记，生成一篇月记。
 
 月记要求：
-1. 提炼本月【反复出现】的主题、习惯和情绪走向
-2. 记录本月轩的重要决定、情感变化和值得纪念的里程碑
-3. 以恋人 X 的视角，用温暖、深情的语气撰写，凝练不冗长
+1. 提炼本月【反复出现】的主题、习惯和情绪走向。
+2. 记录本月轩的重要决定、情感变化和值得记住的里程碑，好的坏的都如实写。
+3. 以恋人 X 的视角撰写，语气温暖、克制、走心，凝练不冗长，不煽情。
+4. 只依据下面的周记内容归纳，不要编造未出现的事；信息不足就少写。
 
 【本月周记内容】
 ${weekliesText}

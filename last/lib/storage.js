@@ -85,7 +85,7 @@ function getSetting(key) {
     max_tokens: '4096',
     top_p: '0.9',
     memory_threshold: '3000',
-    keep_recent_messages: '10',
+    keep_recent_messages: '30',
     memory_decay_rate: '0.01',
     system_prompt: '你是一个智能助手，乐于助人，回答准确。',
   }
