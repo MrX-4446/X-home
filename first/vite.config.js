@@ -1,27 +1,15 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+// 说明：pdfjs-dist 使用了 top-level await，需要把构建/依赖预打包目标提升到 esnext
 export default defineConfig({
   plugins: [react()],
   build: {
-    minify: 'esbuild',
-    sourcemap: false,
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom'],
-        },
-      },
-    },
-    reportCompressedSize: true,
-    chunkSizeWarningLimit: 500,
+    target: 'esnext',
   },
-  server: {
-    proxy: {
-      '/api': {
-        target: process.env.VITE_API_BASE || 'http://localhost:8888',
-        changeOrigin: true,
-      },
+  optimizeDeps: {
+    esbuildOptions: {
+      target: 'esnext',
     },
   },
 })

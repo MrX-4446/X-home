@@ -6,15 +6,11 @@ function normalizeToolName(name) {
   const text = String(name || 'custom_tool')
   const readableNameMap = {
     '网页搜索': 'web_search',
+    '打开网页': 'open_webpage',
     '计算器': 'calculator',
     '天气查询': 'weather_query',
     '翻译': 'translator',
-    '日程管理': 'calendar_manager',
-    '文件处理': 'file_processor',
-    '股票行情': 'stock_quote',
-    '知识图谱': 'knowledge_graph',
     '代码执行': 'execute_code',
-    '地图导航': 'map_navigation',
     '系统时间': 'system_time',
   }
   if (readableNameMap[text]) return readableNameMap[text]
@@ -34,6 +30,13 @@ function buildToolDefinitions(enabledTools) {
         query: { type: 'string', description: '搜索关键词或问题' },
       },
       required: ['query'],
+    },
+    '打开网页': {
+      description: '打开并读取指定网址（URL）的正文内容。当用户发来一个链接、或需要了解某个具体网页里写了什么时使用。注意：这是读取指定链接的真实内容，与「网页搜索」（按关键词搜索）不同。',
+      parameters: {
+        url: { type: 'string', description: '要打开的完整网址，必须以 http:// 或 https:// 开头' },
+      },
+      required: ['url'],
     },
     '计算器': {
       description: '执行数学计算，支持加减乘除、括号、百分比等',
@@ -199,6 +202,16 @@ async function executeToolCall(toolCall, enabledTools) {
       return { ok: false, name: toolName, input: query, error: search.error }
     }
 
+    if (toolName === '打开网页') {
+      const url = String(args.url || args.query || '')
+      // 读取指定 URL 的正文内容
+      const page = await executeFetchUrl(url)
+      if (page.success) {
+        return { ok: true, name: toolName, input: url, output: page.result }
+      }
+      return { ok: false, name: toolName, input: url, error: page.error }
+    }
+
     // 默认工具响应
     return {
       ok: true,
@@ -245,11 +258,6 @@ async function executeTool(toolName, params) {
     '计算器': { type: 'tool', handler: () => executeCalculator(params.expression) },
     '天气查询': { type: 'mobile_app', handler: () => executeMobileApp('天气', params) },
     '翻译': { type: 'mobile_app', handler: () => executeMobileApp('翻译', params) },
-    '日程管理': { type: 'mobile_app', handler: () => executeMobileApp('日程', params) },
-    '文件处理': { type: 'mobile_app', handler: () => executeMobileApp('文件', params) },
-    '地图导航': { type: 'mobile_app', handler: () => executeMobileApp('地图', params) },
-    '股票行情': { type: 'cloud', handler: () => executeSearch(params.query + ' 股票') },
-    '知识图谱': { type: 'cloud', handler: () => executeSearch(params.query) },
     '代码执行': { type: 'tool', handler: async () => {
       const result = await executeCode(params.code)
       return result.success ? { success: true, result: result.output } : { success: false, error: result.error }
@@ -277,24 +285,6 @@ async function executeMobileApp(appName, params) {
       android: `translate://?text=${encodeURIComponent(params.text || '')}&to=${encodeURIComponent(params.target || '')}`,
       fallback: `https://translate.google.com/?text=${encodeURIComponent(params.text || '')}&tl=${getLangCode(params.target)}`,
       message: params.text ? `正在打开翻译应用翻译「${params.text}」到${params.target}` : '正在打开翻译应用'
-    },
-    '日程': {
-      ios: `calshow://${params.date || ''}`,
-      android: `calendar://${params.date || ''}`,
-      fallback: 'https://calendar.google.com',
-      message: params.date ? `正在打开日历查看「${params.date}」的日程` : '正在打开日历应用'
-    },
-    '文件': {
-      ios: `file://${params.path || ''}`,
-      android: `content://${params.path || ''}`,
-      fallback: '',
-      message: params.path ? `正在打开文件「${params.path}」` : '正在打开文件管理应用'
-    },
-    '地图': {
-      ios: `maps://?q=${encodeURIComponent(params.location || '')}`,
-      android: `geo:0,0?q=${encodeURIComponent(params.location || '')}`,
-      fallback: `https://maps.google.com/?q=${encodeURIComponent(params.location || '')}`,
-      message: params.location ? `正在打开地图导航到「${params.location}」` : '正在打开地图应用'
     },
   }
 
@@ -383,6 +373,137 @@ async function executeSearch(query) {
   } catch (e) {
     return { success: false, error: '搜索失败: ' + e.message }
   }
+}
+
+// 抓取指定网址的正文内容
+// 安全要点：
+// 1) 仅允许 http/https，禁止 file://、ftp:// 等其它协议
+// 2) 防 SSRF：拒绝 localhost、内网/保留 IP，避免被诱导访问服务器内网资源
+// 3) 正文截断，避免超长网页把 token 撑爆
+async function executeFetchUrl(url) {
+  if (!url) {
+    return { success: false, error: '网址为空' }
+  }
+
+  // 解析并校验 URL
+  let parsed
+  try {
+    parsed = new URL(url)
+  } catch {
+    return { success: false, error: '网址格式无效，请提供以 http:// 或 https:// 开头的完整链接' }
+  }
+
+  // 只允许 http/https 协议
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { success: false, error: '只支持 http/https 链接' }
+  }
+
+  // 防 SSRF：拒绝本机与内网/保留地址，防止读取服务器内部资源
+  const hostname = parsed.hostname.toLowerCase()
+  const isPrivateHost =
+    hostname === 'localhost' ||
+    hostname === '0.0.0.0' ||
+    hostname.endsWith('.local') ||
+    /^127\./.test(hostname) ||                         // 环回地址
+    /^10\./.test(hostname) ||                          // A 类私有网段
+    /^192\.168\./.test(hostname) ||                    // C 类私有网段
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname) ||    // B 类私有网段 172.16-31
+    /^169\.254\./.test(hostname) ||                    // 链路本地地址
+    hostname === '[::1]' || hostname === '::1'         // IPv6 环回
+  if (isPrivateHost) {
+    return { success: false, error: '出于安全考虑，禁止访问本机或内网地址' }
+  }
+
+  try {
+    // 设置超时，避免慢站点长时间挂起
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 15000)
+
+    const response = await fetch(parsed.href, {
+      headers: {
+        // 伪装常规浏览器 UA，减少被拦截概率
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+      redirect: 'follow',
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timer))
+
+    if (!response.ok) {
+      return { success: false, error: `网页返回错误（HTTP ${response.status}）` }
+    }
+
+    // 只处理文本/HTML 类型，二进制（图片、PDF 等）无法作为文本正文读取
+    const contentType = (response.headers.get('content-type') || '').toLowerCase()
+    if (contentType && !/(text\/|application\/(json|xml|xhtml))/.test(contentType)) {
+      return { success: false, error: `该链接不是可读的网页文本内容（类型：${contentType}）` }
+    }
+
+    const html = await response.text()
+    const { title, text } = extractMainText(html)
+
+    if (!text) {
+      return { success: false, error: '未能从该网页提取到有效正文内容' }
+    }
+
+    // 截断正文，控制返回长度（约 4000 字符），避免占用过多 token
+    const MAX_LEN = 4000
+    const truncated = text.length > MAX_LEN
+      ? text.slice(0, MAX_LEN) + '\n\n（内容较长，已截断）'
+      : text
+
+    const header = `标题：${title || '(无)'}\n网址：${parsed.href}\n\n正文：\n`
+    return { success: true, result: header + truncated }
+  } catch (e) {
+    // 区分超时与其它网络错误
+    if (e.name === 'AbortError') {
+      return { success: false, error: '打开网页超时（15 秒）' }
+    }
+    return { success: false, error: '打开网页失败: ' + e.message }
+  }
+}
+
+// 从 HTML 中抽取标题与正文纯文本（轻量实现，不引入第三方依赖）
+function extractMainText(html) {
+  if (!html) return { title: '', text: '' }
+
+  // 提取 <title>
+  const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)
+  const title = titleMatch ? decodeEntities(titleMatch[1]).trim() : ''
+
+  let content = html
+    // 去掉 script/style/noscript/head 等非正文区块
+    .replace(/<head[\s\S]*?<\/head>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    // 块级标签转为换行，尽量保留段落结构
+    .replace(/<\/(p|div|br|li|h[1-6]|tr|section|article)[^>]*>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    // 去掉剩余所有标签
+    .replace(/<[^>]+>/g, ' ')
+
+  content = decodeEntities(content)
+    // 压缩多余空白：多个空格合一，多个空行合一
+    .replace(/[ \t\f\v]+/g, ' ')
+    .replace(/\n\s*\n\s*\n+/g, '\n\n')
+    .trim()
+
+  return { title, text: content }
+}
+
+// 解码常见 HTML 实体，避免正文里残留 &amp; &nbsp; 等
+function decodeEntities(str) {
+  if (!str) return ''
+  return str
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code, 10)))
 }
 
 async function executeCalculator(expression) {
@@ -489,6 +610,7 @@ module.exports = {
   executeMobileApp,
   getLangCode,
   executeSearch,
+  executeFetchUrl,
   executeCalculator,
   executeWeather,
   executeTranslate,

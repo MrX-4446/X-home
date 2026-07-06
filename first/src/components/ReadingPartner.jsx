@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { api } from '../lib/api'
+import { api, chatWithAI } from '../lib/api'
 
 // ===== SVG 线条图标组件 =====
 const BookIcon = ({ size = 20 }) => (
@@ -376,7 +376,7 @@ function ReadingPartner({ onClose, onSendMessage }) {
 
       {/* 底部提示 */}
       <div className="reading-footer">
-        <p className="reading-tip" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}><LightbulbIcon size={16} /> 支持 TXT、EPUB、PDF 格式电子书</p>
+        <p className="reading-tip" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}><LightbulbIcon size={16} /> 支持 TXT、文字版 PDF</p>
       </div>
     </div>
   )
@@ -408,8 +408,20 @@ function ReadingPartner({ onClose, onSendMessage }) {
 // 上传书籍页面 - 全屏
 function UploadBookPage({ onBack, onClose }) {
   const [dragging, setDragging] = useState(false)
-  const [uploadedFiles, setUploadedFiles] = useState([])
   const fileInputRef = useRef(null)
+
+  // 解析相关状态
+  const [parsing, setParsing] = useState(false)      // 是否正在解析
+  const [parseError, setParseError] = useState('')    // 解析错误信息
+  const [parsedFileName, setParsedFileName] = useState('') // 已解析的文件名
+  const [parsedText, setParsedText] = useState('')    // 解析出的正文
+  const [bookName, setBookName] = useState('')        // 书名（用户可编辑）
+  const [chapter, setChapter] = useState('')          // 章节（用户可编辑）
+  const [saving, setSaving] = useState(false)         // 是否正在保存
+  const [savedTip, setSavedTip] = useState('')        // 保存成功提示
+
+  // 单条笔记正文最多保存的字符数（防止 localStorage 撑爆）
+  const MAX_NOTE_CHARS = 100000
 
   useEffect(() => {
     const originalStyle = document.body.style.cssText
@@ -419,25 +431,146 @@ function UploadBookPage({ onBack, onClose }) {
     }
   }, [])
 
+  // 解析 txt：浏览器原生读取
+  const parseTxt = async (file) => {
+    const text = await file.text()
+    return text
+  }
+
+  // 解析 pdf：动态加载 pdfjs 提取每页文字（仅文字版 PDF 有效，扫描图片版提不出）
+  // 使用 legacy 构建，避免主构建的 top-level await 导致打包目标不兼容
+  const parsePdf = async (file) => {
+    const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
+    const workerUrl = (await import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url')).default
+    pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
+
+    const buf = await file.arrayBuffer()
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise
+    let full = ''
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i)
+      const content = await page.getTextContent()
+      const pageText = content.items.map(it => it.str).join(' ')
+      full += pageText + '\n\n'
+    }
+    return full.trim()
+  }
+
+  // 统一处理一个文件
+  const handleFile = async (file) => {
+    if (!file) return
+    setParseError('')
+    setSavedTip('')
+    setParsing(true)
+    setParsedText('')
+    setParsedFileName(file.name)
+    // 用文件名（去扩展名）作为默认书名
+    const defaultBook = file.name.replace(/\.[^.]+$/, '')
+    setBookName(defaultBook)
+    setChapter('')
+
+    try {
+      const name = file.name.toLowerCase()
+      let text = ''
+      if (name.endsWith('.txt')) {
+        text = await parseTxt(file)
+      } else if (name.endsWith('.pdf')) {
+        text = await parsePdf(file)
+      } else {
+        throw new Error('目前只支持 .txt 和 文字版 .pdf')
+      }
+
+      text = (text || '').trim()
+      if (!text) {
+        throw new Error('没有提取到任何文字。如果是扫描版/图片版 PDF，无法读取其中文字。')
+      }
+      if (text.length > MAX_NOTE_CHARS) {
+        text = text.slice(0, MAX_NOTE_CHARS)
+        setParseError(`文本过长，已截取前 ${MAX_NOTE_CHARS} 字保存。`)
+      }
+      setParsedText(text)
+    } catch (err) {
+      console.error('解析失败:', err)
+      setParseError(err.message || '解析失败')
+      setParsedText('')
+    } finally {
+      setParsing(false)
+    }
+  }
+
   // 处理文件选择
   const handleFileSelect = (e) => {
-    const files = Array.from(e.target.files || [])
-    if (files.length > 0) {
-      setUploadedFiles(prev => [...prev, ...files])
-      console.log('已选择文件:', files.map(f => f.name))
-      // 这里可以添加上传逻辑
-    }
+    const file = (e.target.files || [])[0]
+    handleFile(file)
+    e.target.value = '' // 允许重复选择同一文件
   }
 
   // 处理拖拽
   const handleDrop = (e) => {
     e.preventDefault()
     setDragging(false)
-    const files = Array.from(e.dataTransfer.files || [])
-    if (files.length > 0) {
-      setUploadedFiles(prev => [...prev, files])
-      console.log('拖拽上传文件:', files.map(f => f.name))
+    const file = (e.dataTransfer.files || [])[0]
+    handleFile(file)
+  }
+
+  // 保存为读书笔记：写入 localStorage 并同步到记忆系统
+  const saveAsNote = async () => {
+    if (!parsedText.trim() || saving) return
+    setSaving(true)
+    setSavedTip('')
+
+    const newNote = {
+      id: Date.now(),
+      book: bookName.trim() || '未命名书籍',
+      chapter: chapter.trim() || '',
+      type: 'highlight',
+      content: parsedText,
+      note: '',
+      time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+      tags: ['reading', '导入'],
+      discussions: [],
     }
+
+    // 追加写入 localStorage（NotesPage 从这里读取）
+    try {
+      const saved = JSON.parse(localStorage.getItem('reading-notes') || '[]')
+      localStorage.setItem('reading-notes', JSON.stringify([newNote, ...saved]))
+    } catch (e) {
+      console.error('写入本地笔记失败', e)
+    }
+
+    // 同步到记忆系统（记忆内容截断，避免过大）
+    try {
+      const memoryText = parsedText.length > 4000 ? parsedText.slice(0, 4000) + '……（内容较长已截断）' : parsedText
+      await api.post('/api/memories', {
+        content: `【导入书籍】📖《${newNote.book}》${newNote.chapter ? ` - ${newNote.chapter}` : ''}\n\n${memoryText}`,
+        valence: 0.5,
+        arousal: 0.3,
+        importance: 5,
+        is_pinned: false,
+        is_resolved: false,
+        source: 'reading',
+        tags: ['reading', '读书笔记', newNote.book, '导入'],
+        metadata: {
+          bookName: newNote.book,
+          chapter: newNote.chapter,
+          noteType: 'highlight',
+          noteId: newNote.id,
+          isDiscussion: false,
+          originalContent: memoryText,
+        },
+      })
+    } catch (e) {
+      console.error('同步记忆失败', e)
+    }
+
+    setSaving(false)
+    setSavedTip(`已保存为读书笔记，共 ${parsedText.length} 字。可到「读书笔记」里查看并和她讨论。`)
+    // 重置解析状态，允许继续导入下一本
+    setParsedText('')
+    setParsedFileName('')
+    setBookName('')
+    setChapter('')
   }
 
   return createPortal(
@@ -673,7 +806,7 @@ function UploadBookPage({ onBack, onClose }) {
         >
           <div className="upload-icon" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{dragging ? <FileTextIcon size={56} /> : <UploadIcon size={56} />}</div>
           <div className="upload-text">{dragging ? '松开上传文件' : '拖拽文件到这里'}</div>
-          <div className="upload-hint">支持单个或多个文件上传</div>
+          <div className="upload-hint">支持 .txt 和 文字版 .pdf</div>
         </div>
 
         <div className="upload-or">—— 或者 ——</div>
@@ -690,30 +823,62 @@ function UploadBookPage({ onBack, onClose }) {
           ref={fileInputRef}
           type="file"
           className="hidden-file-input"
-          multiple
-          accept=".txt,.epub,.pdf"
+          accept=".txt,.pdf"
           onChange={handleFileSelect}
         />
 
-        {/* 已上传文件列表 */}
-        {uploadedFiles.length > 0 && (
-          <div className="uploaded-files">
-            {uploadedFiles.map((file, index) => (
-              <div key={index} className="uploaded-file-item">
-                <div>
-                  <div className="uploaded-file-name" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><FileTextIcon size={14} /> {file.name}</div>
-                  <div className="uploaded-file-size">
-                    {(file.size / 1024).toFixed(1)} KB
-                  </div>
-                </div>
-                <button 
-                  className="file-remove-btn"
-                  onClick={() => setUploadedFiles(prev => prev.filter((_, i) => i !== index))}
-                >
-                  ×
-                </button>
-              </div>
-            ))}
+        {/* 解析中提示 */}
+        {parsing && (
+          <div className="parse-status" style={{ marginTop: 24, color: '#7C3AED', fontSize: 15 }}>
+            正在解析「{parsedFileName}」中的文字，请稍候…
+          </div>
+        )}
+
+        {/* 错误提示 */}
+        {parseError && (
+          <div className="parse-error" style={{ marginTop: 16, padding: '12px 16px', background: 'rgba(255,107,107,0.1)', color: '#E05656', borderRadius: 12, fontSize: 14, maxWidth: 600, width: '100%' }}>
+            {parseError}
+          </div>
+        )}
+
+        {/* 保存成功提示 */}
+        {savedTip && (
+          <div className="parse-saved" style={{ marginTop: 16, padding: '12px 16px', background: 'rgba(52,199,89,0.12)', color: '#2E9E4F', borderRadius: 12, fontSize: 14, maxWidth: 600, width: '100%' }}>
+            {savedTip}
+          </div>
+        )}
+
+        {/* 解析结果确认区 */}
+        {parsedText && !parsing && (
+          <div className="parse-preview" style={{ marginTop: 24, width: '100%', maxWidth: 600 }}>
+            <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+              <input
+                value={bookName}
+                onChange={(e) => setBookName(e.target.value)}
+                placeholder="书名"
+                style={{ flex: 1, padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(138,133,128,0.3)', fontSize: 14, fontFamily: 'inherit' }}
+              />
+              <input
+                value={chapter}
+                onChange={(e) => setChapter(e.target.value)}
+                placeholder="章节（可选）"
+                style={{ flex: 1, padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(138,133,128,0.3)', fontSize: 14, fontFamily: 'inherit' }}
+              />
+            </div>
+            <div style={{ fontSize: 13, color: '#8A8580', marginBottom: 8 }}>
+              已提取 {parsedText.length} 字（下方为预览）：
+            </div>
+            <div style={{ maxHeight: 200, overflow: 'auto', padding: '14px 16px', background: 'white', borderRadius: 12, fontSize: 13, lineHeight: 1.7, color: '#4A4036', whiteSpace: 'pre-wrap', boxShadow: '0 2px 8px rgba(74,64,54,0.06)' }}>
+              {parsedText.slice(0, 2000)}{parsedText.length > 2000 ? '……' : ''}
+            </div>
+            <button
+              className="upload-select-btn"
+              style={{ marginTop: 16, width: '100%' }}
+              disabled={saving}
+              onClick={saveAsNote}
+            >
+              {saving ? '保存中…' : '保存为读书笔记'}
+            </button>
           </div>
         )}
 
@@ -721,8 +886,10 @@ function UploadBookPage({ onBack, onClose }) {
           <div className="upload-supported-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><StarIcon size={14} /> 支持的格式</div>
           <div className="upload-supported-formats">
             <span className="format-tag" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><FileTextIcon size={12} /> .txt</span>
-            <span className="format-tag" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><BookIcon size={12} /> .epub</span>
-            <span className="format-tag" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><FileTextIcon size={12} /> .pdf</span>
+            <span className="format-tag" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><FileTextIcon size={12} /> .pdf（文字版）</span>
+          </div>
+          <div style={{ fontSize: 12, color: '#B5B0AB', marginTop: 8 }}>
+            提示：扫描版/图片版 PDF 无法提取文字。
           </div>
         </div>
       </div>
@@ -763,6 +930,7 @@ function NotesPage({ onBack, onClose, selectedNote, setSelectedNote, onSendMessa
   const [newNoteText, setNewNoteText] = useState('')
   const [showDiscussInput, setShowDiscussInput] = useState(false)
   const [discussInput, setDiscussInput] = useState('')
+  const [discussLoading, setDiscussLoading] = useState(false) // AI 正在回复讨论
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [syncStatus, setSyncStatus] = useState({}) // 记录每条笔记的同步状态 { [noteId]: 'synced' | 'syncing' | 'error' }
   const [noteMemoryIds, setNoteMemoryIds] = useState({}) // 记录每条笔记关联的记忆ID { [noteId]: [memoryId1, memoryId2, ...] }
@@ -1096,49 +1264,80 @@ function NotesPage({ onBack, onClose, selectedNote, setSelectedNote, onSendMessa
 
   // 发送讨论消息
   const sendDiscussion = async (noteId) => {
-    if (!discussInput.trim()) return
-    
+    if (!discussInput.trim() || discussLoading) return
+
+    const note = notes.find(n => n.id === noteId)
+    if (!note) return
+
+    const userText = discussInput.trim()
     const newDiscussion = {
       id: Date.now(),
       role: 'user',
-      content: discussInput,
+      content: userText,
       time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
     }
 
-    const note = notes.find(n => n.id === noteId)
-
-    setNotes(prev => prev.map(n => 
-      n.id === noteId 
+    // 先把用户消息渲染出来
+    setNotes(prev => prev.map(n =>
+      n.id === noteId
         ? { ...n, discussions: [...(n.discussions || []), newDiscussion] }
         : n
     ))
     setDiscussInput('')
     setShowDiscussInput(false)
+    setDiscussLoading(true)
 
-    // 同步讨论到记忆系统
-    if (note) {
-      await syncNoteToMemory(note, true, newDiscussion.content)
+    // 同步用户讨论到记忆系统
+    await syncNoteToMemory(note, true, userText)
+
+    // 组装发给 AI 的上下文：
+    // 1) 历史讨论作为多轮对话（保留最近 20 条）
+    // 2) 由于后端 /api/chat 不使用前端传的 system 字段（人设由后端注入），
+    //    这里必须把「笔记正文」拼进最后一条用户消息里，AI 才能真实读取到笔记内容
+    const history = (note.discussions || [])
+      .map(d => ({ role: d.role === 'assistant' ? 'assistant' : 'user', content: d.content }))
+      .slice(-20)
+
+    // 笔记上下文前缀：书名、章节、原文、我的想法
+    const noteContext = `【我们正在讨论一则读书笔记，请你先仔细阅读以下笔记内容，再回应我】
+书籍：《${note.book}》${note.chapter ? `\n章节：${note.chapter}` : ''}
+笔记类型：${noteTypeConfig[note.type]?.label || ''}
+原文内容：
+「${note.content}」${note.note ? `\n我的想法：${note.note}` : ''}
+
+请基于上面这则笔记的真实内容和我讨论，不要脱离原文凭空发挥，不确定的内容不要编造。下面是我要说的话：
+${userText}`
+
+    // 把笔记上下文注入最后一条用户消息
+    const messagesForAI = [...history]
+    if (messagesForAI.length > 0 && messagesForAI[messagesForAI.length - 1].role === 'user') {
+      messagesForAI[messagesForAI.length - 1] = { role: 'user', content: noteContext }
+    } else {
+      messagesForAI.push({ role: 'user', content: noteContext })
     }
 
-    // 调用AI回复
-    setTimeout(() => {
-      const aiReply = {
-        id: Date.now() + 1,
-        role: 'assistant',
-        content: '亲爱的，你说得很对呢～🥺 这本书真的让我想了好多好多，和你一起讨论的感觉真好💕',
-        time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-      }
-      setNotes(prev => prev.map(n => 
-        n.id === noteId 
-          ? { ...n, discussions: [...(n.discussions || []), aiReply] }
-          : n
-      ))
-      
-      // 同步AI回复到记忆系统
-      if (note) {
-        syncNoteToMemory(note, true, `AI: ${aiReply.content}`)
-      }
-    }, 1000)
+    // 调用真实 AI（用固定的读书讨论会话 id，便于记忆系统关联）
+    const aiResult = await chatWithAI({
+      chatId: `reading-note-${noteId}`,
+      messages: messagesForAI,
+    })
+
+    const aiReply = {
+      id: Date.now() + 1,
+      role: 'assistant',
+      content: aiResult.reply || '（她一时没有回应）',
+      time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+    }
+
+    setNotes(prev => prev.map(n =>
+      n.id === noteId
+        ? { ...n, discussions: [...(n.discussions || []), aiReply] }
+        : n
+    ))
+    setDiscussLoading(false)
+
+    // 同步 AI 回复到记忆系统
+    await syncNoteToMemory(note, true, `AI: ${aiReply.content}`)
   }
 
   // 跳转到聊天界面
@@ -1582,6 +1781,14 @@ ${note.note ? `我的想法是：${note.note}` : ''}
                   <div className="discussion-message-time">{msg.time}</div>
                 </div>
               ))}
+              {/* AI 正在思考的加载提示 */}
+              {discussLoading && (
+                <div className="discussion-message assistant">
+                  <div className="discussion-message-bubble" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#8A8580' }}>
+                    <LoaderIcon size={14} /> 她正在读你的笔记并思考…
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* 讨论输入框 */}
@@ -1593,9 +1800,10 @@ ${note.note ? `我的想法是：${note.note}` : ''}
                   value={discussInput}
                   onChange={(e) => setDiscussInput(e.target.value)}
                   rows={3}
+                  disabled={discussLoading}
                 />
-                <button className="discussion-send-btn" onClick={() => sendDiscussion(note.id)}>
-                  发送
+                <button className="discussion-send-btn" onClick={() => sendDiscussion(note.id)} disabled={discussLoading}>
+                  {discussLoading ? '发送中…' : '发送'}
                 </button>
               </div>
             ) : (
