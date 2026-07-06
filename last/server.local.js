@@ -49,6 +49,7 @@ const {
 // 记忆压缩层（情感分析 / 记忆压缩）已抽离到 lib/memory/compress.js
 const {
   analyzeEmotion,
+  extractFacts,
 } = require('./lib/memory/compress')
 
 // 日记 / 周记 / 定时任务层已抽离到 lib/memory/diary.js
@@ -540,7 +541,10 @@ ${messagesText}
                   const summaryResult = await callAIProvider(null, [
                     { role: 'user', content: compressPrompt }
                   ], { useHelperAI: true, temperature: 0.3, maxTokens: 500 })
-                  
+
+                  // 压缩的同时抽取喜好/日程为独立结构化事实记忆（不被日记周记模糊）
+                  await extractFacts(chatId, messagesText)
+
                   if (summaryResult.reply && summaryResult.reply.trim()) {
                     const newMemory = {
                       id: `memory-${Date.now()}`,
@@ -560,7 +564,10 @@ ${messagesText}
                     }
                     
                     mockMemories.push(newMemory)
-                    writeStorage('memories', mockMemories)
+                    // 重新读取最新存储，避免覆盖 extractFacts 刚写入的事实记忆
+                    const latestMemories = readStorage('memories') || []
+                    latestMemories.push(newMemory)
+                    writeStorage('memories', latestMemories)
                     
                     // 更新 chat 的消息列表（移除已压缩的消息）
                     chat.messages = remainingMessages
@@ -831,7 +838,8 @@ ${messagesText}
     if (pathname === '/api/diary/status' && req.method === 'GET') {
       const allMemories = readStorage('memories') || []
       
-      const diaries = allMemories.filter(m => m.source === 'daily_diary' && m.is_active)
+      // 统计所有日记（含被周记归档的），与前端按 source 展示的列表保持一致
+      const diaries = allMemories.filter(m => m.source === 'daily_diary')
       const todayDiary = diaries.find(d => {
         const dateTag = d.tags?.find(t => /^\d{4}-\d{2}-\d{2}$/.test(t))
         return dateTag === getBeijingDateStr()

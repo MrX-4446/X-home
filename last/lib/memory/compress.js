@@ -75,6 +75,93 @@ ${content}
   }
 }
 
+// ========== 结构化事实抽取（喜好 / 日程） ==========
+// 从一段对话文本中抽取"喜好"和"日程"这类精确事实，存为独立的 source:'fact' 记忆。
+// 这类记忆不参与日记/周记的总结与归档，避免被抒情化概括模糊掉，检索时优先浮现。
+async function extractFacts(chatId, messagesText) {
+  if (!messagesText || !messagesText.trim()) return
+
+  const todayStr = new Date(new Date().getTime() + 8 * 60 * 60 * 1000).toISOString().split('T')[0]
+
+  const factPrompt = `从以下对话中抽取轩（用户）明确表达的【喜好】和【日程】，返回 JSON。要求：
+1. 只抽取对话中真实出现的信息，不要推测、不要编造，没有就返回空数组。
+2. 喜好（likes）：轩喜欢/讨厌/偏好的具体事物，逐条列出，保留原始细节。
+3. 日程（schedules）：轩提到的约定、计划、待办，必须完整保留日期、时间、事项；相对时间（如"明天""周五"）请结合今天日期 ${todayStr} 换算成具体日期。
+4. 每条内容简洁、只陈述事实，不要抒情。
+
+返回格式（只返回 JSON，不要其他文字）：
+{
+  "likes": ["喜欢喝美式咖啡", "讨厌香菜"],
+  "schedules": ["2026-07-10 15:00 和产品团队开会", "2026-07-12 妈妈生日"]
+}
+
+对话内容：
+${messagesText}`
+
+  try {
+    const result = await callAIProvider(null, [
+      { role: 'system', content: '你是一个信息抽取助手，只输出严格的 JSON，不做任何推测。' },
+      { role: 'user', content: factPrompt }
+    ], { useHelperAI: true, purpose: '事实抽取', temperature: 0.1, maxTokens: 500 })
+
+    const raw = result.reply || ''
+    const jsonMatch = raw.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) return
+
+    let parsed
+    try {
+      parsed = JSON.parse(jsonMatch[0])
+    } catch {
+      return
+    }
+
+    const likes = Array.isArray(parsed.likes) ? parsed.likes : []
+    const schedules = Array.isArray(parsed.schedules) ? parsed.schedules : []
+    if (likes.length === 0 && schedules.length === 0) return
+
+    const memories = readStorage('memories') || []
+    const nowIso = new Date().toISOString()
+    let added = 0
+
+    const pushFact = (text, factType) => {
+      const content = String(text || '').trim()
+      if (!content) return
+      // 简单去重：同类型、内容完全相同的有效记忆不重复添加
+      const exists = memories.some(m => m.source === 'fact' && m.fact_type === factType && m.is_active && m.content === content)
+      if (exists) return
+      memories.push({
+        id: `fact-${Date.now()}-${added}`,
+        chat_id: chatId,
+        content,
+        source: 'fact',
+        fact_type: factType, // 'like' | 'schedule'
+        tags: [factType === 'schedule' ? '日程' : '喜好'],
+        is_active: true,
+        is_pinned: false,
+        is_resolved: false,
+        importance: 8, // 高于压缩(5)/日记(6)，确保优先浮现
+        valence: 0.6,
+        arousal: 0.3,
+        activation_count: 1,
+        date: todayStr,
+        created_at: nowIso,
+        updated_at: nowIso,
+      })
+      added++
+    }
+
+    likes.forEach(t => pushFact(t, 'like'))
+    schedules.forEach(t => pushFact(t, 'schedule'))
+
+    if (added > 0) {
+      writeStorage('memories', memories)
+      console.log(`[事实抽取] 新增 ${added} 条结构化事实记忆（喜好 ${likes.length} / 日程 ${schedules.length}）`)
+    }
+  } catch (err) {
+    console.error('[事实抽取] 失败:', err.message)
+  }
+}
+
 // ========== 记忆压缩 ==========
 async function compressMemory(chatId, messagesToCompress) {
   if (messagesToCompress.length === 0) return
@@ -103,6 +190,9 @@ ${messagesText}
   })
   
   const content = result.reply || ''
+
+  // 在压缩的同时，抽取喜好/日程为独立的结构化事实记忆（不影响压缩流程）
+  await extractFacts(chatId, messagesText)
 
   if (content) {
     const emotion = await analyzeEmotion(content)
@@ -139,4 +229,5 @@ ${messagesText}
 module.exports = {
   analyzeEmotion,
   compressMemory,
+  extractFacts,
 }

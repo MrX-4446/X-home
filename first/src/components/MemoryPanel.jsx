@@ -450,7 +450,9 @@ function MemoryPanel({ onClose }) {
   }
 
   const allSources = [...new Set(memories.map(m => m.source).filter(Boolean))]
-  const allTags = [...new Set(memories.flatMap(m => m.tags || []).filter(Boolean))]
+  // 排除日期类标签（如日记的 2026-07-05、周记的 周始于:2026-07-01），避免筛选栏被每日日期刷屏
+  const isDateTag = (t) => /^\d{4}-\d{2}-\d{2}$/.test(t) || /^周始于[:：]/.test(t)
+  const allTags = [...new Set(memories.flatMap(m => m.tags || []).filter(t => t && !isDateTag(t)))]
 
   return (
     <>
