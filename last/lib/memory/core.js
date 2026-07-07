@@ -141,10 +141,27 @@ function getRelatedChatIds(currentChatId) {
 // 注意：以下 tokenize / cosineSimilarity 与上文同名，按 JS 函数声明提升规则，
 // 本处（靠后）定义为实际生效版本，保持与原 server.local.js 完全一致的行为
 function tokenize(text) {
-  return text.toLowerCase()
-    .replace(/[^\w\u4e00-\u9fa5]/g, ' ')
-    .split(/\s+/)
-    .filter(t => t.length > 1)
+  // 中文按字切分、英文/数字按词切分。
+  // 注意：中文字与字之间没有空格，不能用 split(/\s+/)，否则整句会变成一个 token
+  // 导致中文语义相似度恒为 0；也不能过滤单字，否则单个汉字会被全部丢弃。
+  const cleanText = String(text || '').toLowerCase().replace(/[^\w\u4e00-\u9fa5]/g, ' ')
+  const tokens = []
+  for (let i = 0; i < cleanText.length; i++) {
+    const ch = cleanText[i]
+    if (ch === ' ') continue
+    if (/[\u4e00-\u9fa5]/.test(ch)) {
+      tokens.push(ch)
+    } else {
+      let word = ''
+      while (i < cleanText.length && /[a-z0-9]/.test(cleanText[i])) {
+        word += cleanText[i]
+        i++
+      }
+      i--
+      if (word) tokens.push(word)
+    }
+  }
+  return tokens
 }
 
 function buildTermVector(tokens) {
