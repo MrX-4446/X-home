@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import errorMonitor from '../lib/errorMonitor'
-import { getApiUrl } from '../lib/api'
+import { getApiUrl, exportData, importData } from '../lib/api'
 
 function AppCheckPanel({ onClose }) {
   const [snapshot, setSnapshot] = useState(() => errorMonitor.getSnapshot())
@@ -8,7 +8,10 @@ function AppCheckPanel({ onClose }) {
   const [isLoadingChecks, setIsLoadingChecks] = useState(true)
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [filter, setFilter] = useState('all') // all | high | medium | runtime | api
+  const [backupMsg, setBackupMsg] = useState('')
+  const [isBackuping, setIsBackuping] = useState(false)
   const tickRef = useRef(null)
+  const fileInputRef = useRef(null)
 
   useEffect(() => {
     const unsubscribe = errorMonitor.subscribe(setSnapshot)
@@ -104,6 +107,55 @@ function AppCheckPanel({ onClose }) {
     }))
     setBasicChecks(results)
     setIsLoadingChecks(false)
+  }
+
+  // 导出备份：下载为本地 JSON 文件
+  async function handleExport() {
+    setIsBackuping(true)
+    setBackupMsg('正在导出...')
+    try {
+      const backup = await exportData()
+      if (!backup) {
+        setBackupMsg('导出失败：无法获取数据')
+        return
+      }
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+      a.href = url
+      a.download = `备份-${stamp}.json`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      setBackupMsg('导出成功，已下载备份文件')
+    } catch (e) {
+      setBackupMsg(`导出失败：${e.message || e}`)
+    } finally {
+      setIsBackuping(false)
+    }
+  }
+
+  // 选择备份文件后触发导入
+  async function handleImportFile(e) {
+    const file = e.target.files?.[0]
+    e.target.value = '' // 允许再次选择同一文件
+    if (!file) return
+    if (!window.confirm('导入将用备份文件覆盖当前数据，确定继续吗？')) return
+    setIsBackuping(true)
+    setBackupMsg('正在导入...')
+    try {
+      const text = await file.text()
+      const backup = JSON.parse(text)
+      const res = await importData(backup)
+      const count = res?.restored?.length || 0
+      setBackupMsg(`导入成功，已恢复 ${count} 项数据。建议刷新页面查看。`)
+    } catch (err) {
+      setBackupMsg(`导入失败：${err.message || err}`)
+    } finally {
+      setIsBackuping(false)
+    }
   }
 
   const allIssues = [
@@ -285,6 +337,37 @@ function AppCheckPanel({ onClose }) {
                       </div>
                     </div>
                   ))}
+                </div>
+              </div>
+
+              {/* 数据备份 */}
+              <div className="checks-section">
+                <h3 className="section-title">数据备份</h3>
+                <div className="backup-box">
+                  <p className="backup-desc">
+                    导出会把全部聊天、记忆、笔记、设置等数据打包成一个 JSON 文件下载到本地；
+                    导入会用备份文件覆盖当前数据。建议定期导出，防止服务器数据丢失。
+                  </p>
+                  <div className="backup-actions">
+                    <button className="header-btn" onClick={handleExport} disabled={isBackuping}>
+                      ↓ 导出备份
+                    </button>
+                    <button
+                      className="header-btn"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isBackuping}
+                    >
+                      ↑ 导入备份
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="application/json,.json"
+                      style={{ display: 'none' }}
+                      onChange={handleImportFile}
+                    />
+                  </div>
+                  {backupMsg && <p className="backup-msg">{backupMsg}</p>}
                 </div>
               </div>
 

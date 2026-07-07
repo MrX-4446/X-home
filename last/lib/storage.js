@@ -5,12 +5,26 @@
 
 const fs = require('fs')
 const path = require('path')
+const Database = require('better-sqlite3')
 
 // 存储目录位于项目根（server.local.js 所在目录），本文件在 lib/ 下，需回退一级
 const STORAGE_DIR = path.join(__dirname, '..', '.local-storage')
 if (!fs.existsSync(STORAGE_DIR)) {
   fs.mkdirSync(STORAGE_DIR, { recursive: true })
 }
+
+// ---------- SQLite 底层（键值表，替代原 JSON 文件）----------
+// 数据库文件放在存储目录下，一个库搞定全部数据。
+// 每一类数据（chats/memories/settings 等）对应一行：key 为原文件名，value 为 JSON 字符串。
+const DB_PATH = path.join(STORAGE_DIR, 'data.db')
+const db = new Database(DB_PATH)
+// WAL 模式：写入更安全、并发读更好；事务保证不会写坏数据。
+db.pragma('journal_mode = WAL')
+db.exec('CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT)')
+
+const _selectStmt = db.prepare('SELECT value FROM kv WHERE key = ?')
+const _upsertStmt = db.prepare('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+const _keysStmt = db.prepare('SELECT key FROM kv ORDER BY key')
 
 // ---------- 服务器日志记录 ----------
 const serverLogs = []
@@ -27,20 +41,24 @@ function log(level, message) {
   console.log(`[${level.toUpperCase()}] ${logEntry.time} - ${message}`)
 }
 
-// ---------- 本地 JSON 存储 ----------
+// ---------- 键值存储（底层为 SQLite，接口保持同步不变）----------
 function readStorage(key) {
-  const file = path.join(STORAGE_DIR, `${key}.json`)
-  if (!fs.existsSync(file)) return null
+  const row = _selectStmt.get(key)
+  if (!row) return null
   try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'))
+    return JSON.parse(row.value)
   } catch {
     return null
   }
 }
 
 function writeStorage(key, data) {
-  const file = path.join(STORAGE_DIR, `${key}.json`)
-  fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8')
+  _upsertStmt.run(key, JSON.stringify(data))
+}
+
+// 列出所有存储键名（供导出/备份使用，替代原来的读目录列文件）
+function listStorageKeys() {
+  return _keysStmt.all().map(r => r.key)
 }
 
 // ---------- HTTP 响应辅助 + CORS ----------
@@ -98,6 +116,7 @@ module.exports = {
   log,
   readStorage,
   writeStorage,
+  listStorageKeys,
   ALLOWED_ORIGIN,
   CORS_HEADERS,
   sendJson,

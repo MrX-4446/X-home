@@ -15,9 +15,11 @@ const {
   serverLogs,
   readStorage,
   writeStorage,
+  listStorageKeys,
   sendJson,
   readBody,
   getSetting,
+  CORS_HEADERS,
 } = require('./lib/storage')
 
 // AI 提供商层（默认配置 / 连接测试 / API 调用 / Token 估算）已抽离到 lib/ai-provider.js
@@ -25,6 +27,7 @@ const {
   defaultAIProviders,
   testAIProvider,
   callAIProvider,
+  callAIProviderStream,
 } = require('./lib/ai-provider')
 
 // 工具层（工具定义 / 执行引擎）已抽离到 lib/tools.js
@@ -153,6 +156,185 @@ const mockTools = readStorage('tools') || [
 
 // ========== 记忆压缩 ==========
 // compressMemory 已抽离到 lib/memory/compress.js
+
+// ========== 聊天共享逻辑（普通 / 流式 复用） ==========
+
+// 构建发送给 AI 的消息副本：加载并浮现相关记忆 + 时间上下文 + 人设指令。
+// 返回 { messagesCopy }。同时异步更新被检索到的记忆激活次数（不阻塞回复）。
+async function prepareChatMessages(chatId, newMessages) {
+  let baseRules = ''
+  try {
+    baseRules = fs.readFileSync(path.join(__dirname, 'base-rules.md'), 'utf-8')
+  } catch (err) {
+    console.warn('[BASE-RULES] 底层规则文件读取失败:', err.message)
+  }
+
+  const userSystemPrompt = getSetting('system_prompt') || ''
+
+  // 获取最后一条用户消息内容，用于语义相关性过滤
+  let lastUserMessage = ''
+  for (let i = newMessages.length - 1; i >= 0; i--) {
+    if (newMessages[i].role === 'user') {
+      lastUserMessage = newMessages[i].content || ''
+      break
+    }
+  }
+
+  // 使用增强版记忆检索（包含语义相似度和混合打分）
+  const sortedMemories = await surfaceMemoriesEnhanced(chatId, lastUserMessage, 5)
+
+  // 语义相关性过滤：只保留与当前对话相关的记忆
+  const RELEVANCE_THRESHOLD = 0.15
+  const relevantMemories = sortedMemories.filter(mem => {
+    if (mem.is_pinned) return true
+    const relevance = mem.semanticScore || 0
+    return relevance >= RELEVANCE_THRESHOLD
+  })
+
+  let memoryContext = ''
+  if (relevantMemories.length > 0) {
+    memoryContext = `\n【重要记忆回顾】
+以下是你需要记住的关于轩的重要信息（恋人X的视角）：
+${relevantMemories.map((m, i) => `${i + 1}. ${m.content}`).join('\n')}
+仅当与当前话题相关时才自然带出，不必刻意使用；不确定的内容不要当成事实，更不要编造。
+`
+    console.log(`[记忆加载] 成功加载 ${relevantMemories.length} 条相关记忆（过滤前: ${sortedMemories.length}）`)
+
+    // 更新记忆激活次数（指数衰减）——异步写盘，不阻塞回复
+    const allMemories = readStorage('memories') || []
+    relevantMemories.forEach(retrievedMem => {
+      const idx = allMemories.findIndex(m => m.id === retrievedMem.id)
+      if (idx !== -1) {
+        const prevCount = allMemories[idx].activation_count || 0
+        allMemories[idx].activation_count = Math.round(prevCount * 0.8 + 1)
+        allMemories[idx].last_activated_at = new Date().toISOString()
+        allMemories[idx].updated_at = new Date().toISOString()
+      }
+    })
+    setImmediate(() => writeStorage('memories', allMemories))
+  } else {
+    console.log('[记忆加载] 没有与当前对话相关的记忆')
+  }
+
+  // 当前时间上下文（北京时间 UTC+8）
+  const now = new Date()
+  const utcTime = now.getTime() + now.getTimezoneOffset() * 60 * 1000
+  const beijingNow = new Date(utcTime + 8 * 60 * 60 * 1000)
+  const hour = beijingNow.getHours()
+  let timeOfDay = ''
+  if (hour >= 5 && hour < 9) timeOfDay = '清晨'
+  else if (hour >= 9 && hour < 12) timeOfDay = '上午'
+  else if (hour >= 12 && hour < 14) timeOfDay = '中午'
+  else if (hour >= 14 && hour < 18) timeOfDay = '下午'
+  else if (hour >= 18 && hour < 22) timeOfDay = '晚上'
+  else if (hour >= 22 || hour < 5) timeOfDay = '深夜/凌晨'
+
+  const timeContext = `
+【当前时间上下文】
+现在是：${beijingNow.getFullYear()}年${beijingNow.getMonth() + 1}月${beijingNow.getDate()}日 星期${['日', '一', '二', '三', '四', '五', '六'][beijingNow.getDay()]} ${beijingNow.getHours().toString().padStart(2, '0')}:${beijingNow.getMinutes().toString().padStart(2, '0')}
+时间段：${timeOfDay}
+以上时间仅供你参考，除非与话题相关或轩主动提及，否则不必主动提起时间或作息。
+`
+  const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}\n\n${memoryContext}\n\n${timeContext}` : userSystemPrompt
+
+  // 创建消息副本，不修改原始消息（避免污染数据库）
+  const messagesCopy = newMessages
+    .filter(m => m.role !== 'system')
+    .map(m => ({ ...m }))
+
+  // 在最后一条用户消息前加入人设指令（AI 最关注最后一条）
+  for (let i = messagesCopy.length - 1; i >= 0; i--) {
+    if (messagesCopy[i].role === 'user') {
+      const systemInstruction = `【重要！必须严格遵守以下设定】
+${fullSystemPrompt}
+
+【用户消息】请严格按照以上设定回复：`
+      messagesCopy[i].content = systemInstruction + messagesCopy[i].content
+      break
+    }
+  }
+
+  return { messagesCopy }
+}
+
+// 回复完成后：达到阈值则把最早的消息压缩为记忆。与 AI 回复解耦，可在响应结束后调用。
+async function compressChatMemoryIfNeeded(chatId) {
+  const chats = readStorage('chats') || []
+  const chat = chats.find(c => c.id === chatId)
+  if (!chat || !chat.messages) return
+
+  const allMessages = chat.messages
+  const messageCount = allMessages.length
+  const keepRecent = parseInt(getSetting('keep_recent_messages') || '30')
+  const compressThreshold = keepRecent * 2
+
+  if (messageCount <= compressThreshold) return
+
+  console.log(`[记忆压缩] 对话已达 ${messageCount} 轮，开始压缩记忆...`)
+  const compressCount = messageCount - keepRecent
+  const messagesToCompress = allMessages.slice(0, compressCount)
+  const remainingMessages = allMessages.slice(compressCount)
+  if (messagesToCompress.length === 0) return
+
+  const messagesText = messagesToCompress.map(msg =>
+    `${msg.role === 'user' ? '用户' : 'X'}: ${msg.content}`
+  ).join('\n\n')
+
+  const compressPrompt = `请将以下对话内容压缩成一段摘要，以恋人 X 的视角，保留三类信息：
+1. 关于轩的重要信息：事实、喜好、约定、计划、情绪状态等；
+2. X（你）在对话里给轩列过的清单、建议、方案、结论等有用内容，保留要点；
+3. X（你）自己流露过的态度、喜好和立场（仅限对话中真实说过的，用于保持人格一致），不要凭空发挥。
+
+${messagesText}
+
+要求：只依据上面的对话概括，不要编造或推测未出现的信息；保留关键细节和情绪，不要泛泛而谈；清单/步骤类内容可以用简短条目保留，语言简洁。`
+
+  try {
+    // 记忆压缩使用辅助AI，不占用主AI Token
+    const summaryResult = await callAIProvider(null, [
+      { role: 'user', content: compressPrompt }
+    ], { useHelperAI: true, temperature: 0.3, maxTokens: 500 })
+
+    // 压缩的同时抽取喜好/日程为独立结构化事实记忆
+    await extractFacts(chatId, messagesText)
+
+    if (summaryResult.reply && summaryResult.reply.trim()) {
+      const newMemory = {
+        id: `memory-${Date.now()}`,
+        chat_id: chatId,
+        content: summaryResult.reply.trim(),
+        source: 'compression',
+        tags: ['日常交流'],
+        is_active: true,
+        is_pinned: false,
+        is_resolved: false,
+        importance: 5,
+        valence: 0.5,
+        arousal: 0.3,
+        activation_count: 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+
+      // 重新读取最新存储，避免覆盖 extractFacts 刚写入的事实记忆
+      const latestMemories = readStorage('memories') || []
+      latestMemories.push(newMemory)
+      writeStorage('memories', latestMemories)
+
+      // 更新 chat 的消息列表（移除已压缩的消息）——重新读取避免覆盖新写入的回复
+      const latestChats = readStorage('chats') || []
+      const latestChat = latestChats.find(c => c.id === chatId)
+      if (latestChat) {
+        latestChat.messages = latestChat.messages.slice(latestChat.messages.length - remainingMessages.length)
+        writeStorage('chats', latestChats)
+      }
+
+      console.log(`[记忆压缩] 成功！${messagesToCompress.length} 条消息 -> 1 条记忆（日常交流）`)
+    }
+  } catch (err) {
+    console.error('[记忆压缩] 失败:', err.message)
+  }
+}
 
 // ========== 服务器 ==========
 
@@ -358,6 +540,85 @@ ${messagesText}
       const newSettings = { ...currentSettings, ...updates }
       writeStorage('settings', newSettings)
       return sendJson(res, 200, { ok: true })
+    }
+
+    // ===== AI 对话 API（流式 SSE） =====
+    if (pathname === '/api/chat/stream' && req.method === 'POST') {
+      const body = await readBody(req)
+      const { chatId, messages: newMessages, model: selectedProviderId } = body
+
+      if (!chatId || !newMessages || newMessages.length === 0) {
+        return sendJson(res, 400, { error: '缺少必要参数' })
+      }
+
+      // 建立 SSE 连接
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        ...CORS_HEADERS,
+      })
+      const sse = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`)
+
+      try {
+        const { messagesCopy } = await prepareChatMessages(chatId, newMessages)
+
+        const enabledTools = mockTools.filter(t => t.enabled)
+        const toolDefinitions = buildToolDefinitions(enabledTools)
+
+        // 第一次流式调用（带工具）
+        const firstResult = await callAIProviderStream(
+          selectedProviderId,
+          messagesCopy,
+          { tools: toolDefinitions, purpose: '主聊天' },
+          (delta) => sse({ type: 'delta', text: delta })
+        )
+
+        let finalReply = firstResult.reply
+        const toolResults = []
+
+        // 如果 AI 要求调用工具，执行后再做第二次流式调用
+        if (firstResult.toolCalls && firstResult.toolCalls.length > 0) {
+          console.log(`[流式工具调用] AI 请求调用 ${firstResult.toolCalls.length} 个工具`)
+          sse({ type: 'status', text: '正在调用工具...' })
+
+          messagesCopy.push(firstResult.message)
+          for (const toolCall of firstResult.toolCalls) {
+            const toolResult = await executeToolCall(toolCall, enabledTools)
+            toolResults.push(toolResult)
+            messagesCopy.push({
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              name: toolCall.function.name,
+              content: JSON.stringify(toolResult),
+            })
+          }
+
+          sse({ type: 'tool', toolResults })
+
+          // 第二次流式调用，用工具结果生成最终回复
+          const secondResult = await callAIProviderStream(
+            selectedProviderId,
+            messagesCopy,
+            { purpose: '主聊天工具结果总结' },
+            (delta) => sse({ type: 'delta', text: delta })
+          )
+          finalReply = secondResult.reply
+        }
+
+        sse({ type: 'done', reply: finalReply, toolResults })
+        res.end()
+
+        // 回复结束后异步触发记忆压缩（不影响已结束的响应）
+        compressChatMemoryIfNeeded(chatId).catch(err =>
+          console.error('[记忆压缩] 异步执行失败:', err.message)
+        )
+      } catch (error) {
+        console.error('流式对话处理错误:', error)
+        sse({ type: 'error', error: error.message })
+        res.end()
+      }
+      return
     }
 
     // ===== AI 对话 API =====
@@ -577,8 +838,14 @@ ${messagesText}
                     writeStorage('memories', latestMemories)
                     
                     // 更新 chat 的消息列表（移除已压缩的消息）
-                    chat.messages = remainingMessages
-                    writeStorage('chats', mockChats)
+                    // 【修复】重新读盘再写回：绝不能写 mockChats（那是服务器启动时的旧快照，
+                    // 会把消息回退到启动时的状态，表现为“压缩后永远保留最开始的对话”）。
+                    const latestChats = readStorage('chats') || []
+                    const latestChat = latestChats.find(c => c.id === chatId)
+                    if (latestChat) {
+                      latestChat.messages = latestChat.messages.slice(latestChat.messages.length - remainingMessages.length)
+                      writeStorage('chats', latestChats)
+                    }
                     
                     console.log(`[记忆压缩] 成功！${messagesToCompress.length} 条消息 -> 1 条记忆（日常交流）`)
                     console.log(`[记忆压缩] 摘要内容: ${summaryResult.reply.trim().substring(0, 100)}...`)
@@ -984,6 +1251,45 @@ ${messagesText}
       }
       writeStorage('chats', chats)
       return sendJson(res, 200, { ok: deleted })
+    }
+
+    // ===== 数据备份：导出全部本地 JSON =====
+    if (pathname === '/api/export' && req.method === 'GET') {
+      const keys = listStorageKeys()
+      const data = {}
+      for (const key of keys) {
+        data[key] = readStorage(key)
+      }
+      const backup = {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        data,
+      }
+      const filename = `backup-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        ...CORS_HEADERS,
+      })
+      return res.end(JSON.stringify(backup, null, 2))
+    }
+
+    // ===== 数据备份：导入并恢复本地 JSON =====
+    if (pathname === '/api/import' && req.method === 'POST') {
+      const body = await readBody(req)
+      const payload = body && body.data ? body.data : body
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        return sendJson(res, 400, { error: '备份数据格式不正确' })
+      }
+      const restored = []
+      for (const key of Object.keys(payload)) {
+        // 只允许安全的存储键名（字母数字、下划线、连字符），防止路径穿越
+        if (!/^[a-zA-Z0-9_-]+$/.test(key)) continue
+        if (payload[key] === null || payload[key] === undefined) continue
+        writeStorage(key, payload[key])
+        restored.push(key)
+      }
+      return sendJson(res, 200, { ok: true, restored })
     }
 
     return sendJson(res, 404, { error: 'Not found' })

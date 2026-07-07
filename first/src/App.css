@@ -4397,6 +4397,32 @@ select.ai-form-input option:first-child {
   color: #C77B30;
 }
 
+.app-check-fullscreen .backup-box {
+  padding: 16px;
+  background: linear-gradient(180deg, #FFFFFF 0%, #FAFAFA 100%);
+  border: 1px solid rgba(138, 133, 128, 0.08);
+  border-radius: var(--radius-md);
+}
+
+.app-check-fullscreen .backup-desc {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.app-check-fullscreen .backup-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.app-check-fullscreen .backup-msg {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
 .app-check-fullscreen .info-bar {
   display: flex;
   gap: 16px;

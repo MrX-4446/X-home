@@ -102,10 +102,9 @@ async function testAIProvider(provider) {
   }
 }
 
-// ---------- AI API 调用（OpenAI 兼容格式） ----------
-async function callAIProvider(provider, messages, options = {}) {
-  const { tools = null, temperature, maxTokens, topP, useHelperAI = false, purpose = '主聊天' } = options
-
+// ---------- 解析要使用的 AI 提供商 + API Key ----------
+// 从 callAIProvider 抽离，供普通调用与流式调用共享，避免逻辑重复。
+function resolveProviderAndKey(provider, useHelperAI) {
   let storedProviders = readStorage('ai-providers')
   // 如果存储为空或空数组，使用默认配置
   if (!storedProviders || storedProviders.length === 0) {
@@ -138,10 +137,6 @@ async function callAIProvider(provider, messages, options = {}) {
     throw new Error('没有可用的 AI 提供商')
   }
 
-  console.log(`[AI调用] 类型: ${useHelperAI ? '辅助任务' : purpose}`)
-  console.log(`[AI调用] 使用AI: ${aiProvider.name || aiProvider.id}`)
-  console.log(`[AI调用] 模型: ${aiProvider.model}`)
-
   // 获取 API Key
   let apiKey = process.env.ARK_API_KEY || ''
   if (!apiKey && aiProvider._apiKeyPlain) {
@@ -150,6 +145,19 @@ async function callAIProvider(provider, messages, options = {}) {
   if (!apiKey) {
     throw new Error('未配置有效的 API Key，请在 .env 中设置 ARK_API_KEY')
   }
+
+  return { aiProvider, apiKey }
+}
+
+// ---------- AI API 调用（OpenAI 兼容格式） ----------
+async function callAIProvider(provider, messages, options = {}) {
+  const { tools = null, temperature, maxTokens, topP, useHelperAI = false, purpose = '主聊天' } = options
+
+  const { aiProvider, apiKey } = resolveProviderAndKey(provider, useHelperAI)
+
+  console.log(`[AI调用] 类型: ${useHelperAI ? '辅助任务' : purpose}`)
+  console.log(`[AI调用] 使用AI: ${aiProvider.name || aiProvider.id}`)
+  console.log(`[AI调用] 模型: ${aiProvider.model}`)
 
   // OpenAI 兼容格式调用
   console.log('\n========== 发送给 AI 的消息 ==========')
@@ -205,6 +213,117 @@ async function callAIProvider(provider, messages, options = {}) {
   }
 }
 
+// ---------- AI API 流式调用（OpenAI 兼容 SSE 格式） ----------
+// onDelta(textChunk)：每收到一段正文增量就回调，用于实时推送给前端。
+// 返回值与 callAIProvider 一致：{ ok, reply, message, toolCalls }，
+// 便于复用后续的工具调用流程（工具调用不走增量展示，整体累积后返回）。
+async function callAIProviderStream(provider, messages, options = {}, onDelta) {
+  const { tools = null, temperature, maxTokens, topP, useHelperAI = false, purpose = '主聊天' } = options
+
+  const { aiProvider, apiKey } = resolveProviderAndKey(provider, useHelperAI)
+
+  console.log(`[AI流式调用] 类型: ${purpose}，模型: ${aiProvider.model}`)
+
+  const requestBody = {
+    model: aiProvider.model,
+    messages: messages,
+    temperature: temperature ?? parseFloat(getSetting('temperature') || '0.7'),
+    max_tokens: maxTokens ?? parseInt(getSetting('max_tokens') || '4096'),
+    top_p: topP ?? parseFloat(getSetting('top_p') || '0.9'),
+    stream: true,
+  }
+
+  if (tools && tools.length > 0) {
+    requestBody.tools = tools
+    requestBody.tool_choice = 'auto'
+  }
+
+  const response = await fetch(aiProvider.endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(requestBody),
+  })
+
+  if (!response.ok || !response.body) {
+    throw new Error(`AI API 流式调用失败: ${response.status}`)
+  }
+
+  let fullContent = ''
+  // 工具调用在流式模式下按 index 分片下发，需按索引累积拼接
+  const toolCallsMap = {}
+  let finishReason = null
+  let buffer = ''
+
+  // Node 18+ 的 fetch 返回的 body 是 Web ReadableStream，可用 for-await 迭代
+  const decoder = new TextDecoder('utf-8')
+  for await (const chunk of response.body) {
+    buffer += decoder.decode(chunk, { stream: true })
+
+    // SSE 以 \n\n 分隔事件，逐行解析 data: 字段
+    let sepIndex
+    while ((sepIndex = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, sepIndex).trim()
+      buffer = buffer.slice(sepIndex + 1)
+
+      if (!line || !line.startsWith('data:')) continue
+      const payload = line.slice(5).trim()
+      if (payload === '[DONE]') continue
+
+      let json
+      try {
+        json = JSON.parse(payload)
+      } catch {
+        continue // 不完整的分片，跳过（下次循环补齐）
+      }
+
+      const choice = json.choices?.[0]
+      if (!choice) continue
+      const delta = choice.delta || {}
+
+      if (delta.content) {
+        fullContent += delta.content
+        if (typeof onDelta === 'function') onDelta(delta.content)
+      }
+
+      // 累积工具调用分片
+      if (Array.isArray(delta.tool_calls)) {
+        delta.tool_calls.forEach(tc => {
+          const idx = tc.index ?? 0
+          if (!toolCallsMap[idx]) {
+            toolCallsMap[idx] = { id: tc.id || '', type: 'function', function: { name: '', arguments: '' } }
+          }
+          if (tc.id) toolCallsMap[idx].id = tc.id
+          if (tc.function?.name) toolCallsMap[idx].function.name += tc.function.name
+          if (tc.function?.arguments) toolCallsMap[idx].function.arguments += tc.function.arguments
+        })
+      }
+
+      if (choice.finish_reason) finishReason = choice.finish_reason
+    }
+  }
+
+  const toolCalls = Object.keys(toolCallsMap)
+    .sort((a, b) => Number(a) - Number(b))
+    .map(k => toolCallsMap[k])
+
+  const message = {
+    role: 'assistant',
+    content: fullContent || '',
+  }
+  if (toolCalls.length > 0) message.tool_calls = toolCalls
+
+  return {
+    ok: true,
+    reply: fullContent,
+    message,
+    toolCalls,
+    finishReason,
+  }
+}
+
 // ---------- Token 估算（简化版） ----------
 function estimateTokens(text) {
   // 简单估算：中文约 1.5 字符 = 1 token，英文约 4 字符 = 1 token
@@ -221,6 +340,7 @@ module.exports = {
   defaultAIProviders,
   testAIProvider,
   callAIProvider,
+  callAIProviderStream,
   estimateTokens,
   estimateMessagesTokens,
 }

@@ -20,7 +20,7 @@ import {
   compressChatMemory as compressChatMemoryDB,
   sendMessage as sendMessageDB,
   getMessages,
-  chatWithAI,
+  chatWithAIStream,
   getAIProviders,
   getTools,
   saveTools,
@@ -40,6 +40,8 @@ function App() {
   const [inputValue, setInputValue] = useState('')
   const [selectedModel, setSelectedModel] = useState('model-1')
   const [isTyping, setIsTyping] = useState(false)
+  // 流式回复中正在生成的文本（AI 未写库前，用于实时展示打字机效果）
+  const [streamingText, setStreamingText] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [currentPage, setCurrentPage] = useState('home')
   const [loading, setLoading] = useState(true)
@@ -58,17 +60,9 @@ function App() {
   const [diaryOpen, setDiaryOpen] = useState(false)
   const [appCheckOpen, setAppCheckOpen] = useState(false)
   const [readingOpen, setReadingOpen] = useState(false) // 共读伴侣界面
-  const [toolList, setToolList] = useState([
-    { id: 'tool-1', name: '网页搜索', description: '实时搜索互联网信息', iconKey: '搜索', enabled: true, category: '搜索', type: 'tool' },
-    { id: 'tool-2', name: '计算器', description: '执行数学计算', iconKey: '计算器', enabled: true, category: '工具', type: 'tool' },
-    { id: 'tool-3', name: '天气查询', description: '查询全球天气信息', iconKey: '天气', enabled: false, category: '生活', type: 'tool' },
-    { id: 'tool-4', name: '翻译', description: '多语言翻译', iconKey: '翻译', enabled: true, category: '工具', type: 'tool' },
-    { id: 'tool-5', name: '日程管理', description: '管理日历和日程', iconKey: '日程', enabled: false, category: '生活', type: 'tool' },
-    { id: 'tool-6', name: '文件处理', description: '读取和处理文档文件', iconKey: '文件', enabled: true, category: '工具', type: 'tool' },
-    { id: 'tool-7', name: '股票行情', description: '查询实时股票数据', iconKey: '股票', enabled: false, category: '金融', type: 'tool' },
-    { id: 'tool-8', name: '知识图谱', description: '查询百科知识', iconKey: '知识', enabled: true, category: '知识', type: 'tool' },
-    { id: 'tool-9', name: '代码执行', description: '执行 Python 代码，支持数学计算、数据处理等', iconKey: '代码', enabled: true, category: '工具', type: 'tool' },
-  ])
+  // 工具列表以后端返回为准（loadTools 会覆盖），
+  // 初始置空避免首屏闪现后端未实现的工具
+  const [toolList, setToolList] = useState([])
   const [aiList, setAIList] = useState([])
   const [settings, setSettings] = useState({
     chat_name: '',
@@ -217,15 +211,18 @@ function App() {
     return date.toLocaleDateString('zh-CN')
   }
 
-  const handleSend = async () => {
-    if (!inputValue.trim() || isTyping) return
+  // 发送核心逻辑：接受纯文本参数，供输入框发送与共读伴侣等场景直接调用，
+  // 不再依赖 DOM 时序或模拟按键。
+  const sendText = async (rawText) => {
+    const userText = (rawText || '').trim()
+    if (!userText || isTyping) return
 
     // 如果没有当前聊天，先创建一个
     let chatId = currentChatId
     if (!chatId) {
       const newChat = await createChatDB({
         title: '新对话',
-        preview: inputValue.trim().substring(0, 30),
+        preview: userText.substring(0, 30),
         chat_name: '智语助手',
         chat_avatar: '智'
       })
@@ -238,7 +235,6 @@ function App() {
 
     if (!chatId) return
 
-    const userText = inputValue.trim()
     const newMessage = {
       chat_id: chatId,
       role: 'user',
@@ -249,46 +245,73 @@ function App() {
     await sendMessageDB(newMessage)
     setInputValue('')
     setIsTyping(true)
-    // 立即刷新本会话消息，让用户消息先显示出来
-    await loadMessages(chatId)
 
-    // 2) 组装多轮对话上下文：历史消息 + 本轮用户输入
-    //    仅保留最近 20 条，避免 prompt 过长造成 token 浪费
-    const history = (currentChat?.messages || [])
-      .map((m) => ({ role: m.role, content: m.content }))
-      .slice(-20)
-    const messagesForAI = [...history, { role: 'user', content: userText }]
+    // 用 try/finally 兜底：无论 AI 调用或任何一步数据库操作是否报错，
+    // 都会在 finally 里重置 isTyping / streamingText，避免卡在“转圈”且无法重发。
+    try {
+      // 立即刷新本会话消息，让用户消息先显示出来
+      await loadMessages(chatId)
 
-    // 3) 调用后端 AI 接口，并把已启用工具交给后端，由后端统一执行工具调用
-    const aiResult = await chatWithAI({
-      chatId: chatId,
-      system: settings.system_prompt || '',
-      messages: messagesForAI,
-      model: selectedModel,
-      temperature: parseFloat(settings.temperature) || aiConfig.temperature,
-      maxTokens: parseInt(settings.max_tokens) || aiConfig.maxTokens,
-      topP: parseFloat(settings.top_p) || aiConfig.topP,
-      deepThinking: aiConfig.deepThinking,
-      tools: toolList.filter(tool => tool.enabled),
-    })
+      // 2) 组装多轮对话上下文：历史消息 + 本轮用户输入
+      //    仅保留最近 20 条，避免 prompt 过长造成 token 浪费
+      const history = (currentChat?.messages || [])
+        .map((m) => ({ role: m.role, content: m.content }))
+        .slice(-20)
+      const messagesForAI = [...history, { role: 'user', content: userText }]
 
-    const toolMetadata = aiResult.toolResults?.length
-      ? `\n\n[[TOOL_RESULTS_JSON]]${encodeURIComponent(JSON.stringify(aiResult.toolResults))}`
-      : ''
+      // 3) 调用后端 AI 流式接口，边接收边展示打字机效果
+      setStreamingText('')
+      const aiResult = await chatWithAIStream({
+        chatId: chatId,
+        system: settings.system_prompt || '',
+        messages: messagesForAI,
+        model: selectedModel,
+        temperature: parseFloat(settings.temperature) || aiConfig.temperature,
+        maxTokens: parseInt(settings.max_tokens) || aiConfig.maxTokens,
+        topP: parseFloat(settings.top_p) || aiConfig.topP,
+        deepThinking: aiConfig.deepThinking,
+        tools: toolList.filter(tool => tool.enabled),
+      }, {
+        // 每收到一段增量就累积展示（isTyping 保持为真，直到回复保存完成，
+        // 避免流式过程中用户重复发送；气泡由 streamingText 驱动展示）
+        onDelta: (_chunk, full) => {
+          setStreamingText(full)
+        },
+      })
 
-    // 4) 保存 AI 回复并刷新
-    await sendMessageDB({
-      chat_id: chatId,
-      role: 'assistant',
-      content: `${aiResult.reply || '（AI 没有返回内容）'}${toolMetadata}`,
-    })
+      const toolMetadata = aiResult.toolResults?.length
+        ? `\n\n[[TOOL_RESULTS_JSON]]${encodeURIComponent(JSON.stringify(aiResult.toolResults))}`
+        : ''
 
-    await updateChatDB(chatId, {
-      preview: userText.substring(0, 30) + (userText.length > 30 ? '...' : ''),
-    })
-    await loadMessages(chatId)
-    await loadChats(true)
-    setIsTyping(false)
+      // 4) 保存 AI 回复并刷新（清空流式临时文本，改由数据库消息渲染）
+      await sendMessageDB({
+        chat_id: chatId,
+        role: 'assistant',
+        content: `${aiResult.reply || '（AI 没有返回内容）'}${toolMetadata}`,
+      })
+
+      await updateChatDB(chatId, {
+        preview: userText.substring(0, 30) + (userText.length > 30 ? '...' : ''),
+      })
+      await loadMessages(chatId)
+      await loadChats(true)
+    } catch (err) {
+      // 链路任意一步异常（如网络/数据库写入失败）：提示用户并把输入回填，方便重发
+      console.error('发送消息失败:', err)
+      setInputValue(userText)
+    } finally {
+      // 无论成功或失败，都解除“正在输入”状态并清空流式临时文本
+      setStreamingText('')
+      setIsTyping(false)
+    }
+  }
+
+  // 输入框发送：读取当前输入并清空，交给 sendText 处理
+  const handleSend = () => {
+    const text = inputValue.trim()
+    if (!text || isTyping) return
+    setInputValue('')
+    sendText(text)
   }
 
   const handleKeyPress = (e) => {
@@ -408,6 +431,7 @@ function App() {
             onSend={handleSend}
             onKeyPress={handleKeyPress}
             isTyping={isTyping}
+            streamingText={streamingText}
             selectedModel={selectedModel}
             models={aiList.filter(ai => ai.enabled)}
             onModelChange={setSelectedModel}
@@ -485,18 +509,9 @@ function App() {
         <ReadingPartner
           onClose={() => setReadingOpen(false)}
           onSendMessage={(text) => {
-            // 直接在当前聊天中发送共读讨论内容
-            setInputValue(text)
+            // 切到聊天页并直接发送共读讨论内容，不再依赖 DOM 时序模拟回车
             setCurrentPage('chat')
-            // 延迟一下，让页面切换完成后自动发送
-            setTimeout(() => {
-              const inputElement = document.querySelector('textarea')
-              if (inputElement) {
-                // 触发发送（模拟回车）
-                const event = new KeyboardEvent('keydown', { key: 'Enter' })
-                inputElement.dispatchEvent(event)
-              }
-            }, 100)
+            sendText(text)
           }}
         />
       )}

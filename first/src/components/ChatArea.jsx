@@ -11,6 +11,7 @@ function ChatArea({
   onSend, 
   onKeyPress, 
   isTyping,
+  streamingText,
   selectedModel,
   models,
   onModelChange,
@@ -103,6 +104,13 @@ function ChatArea({
     }
   }, [isTyping])
 
+  // 流式文本增长时跟随滚动（仅当用户已在底部时），保证打字机内容始终可见
+  useEffect(() => {
+    if (streamingText && checkIsAtBottom()) {
+      scrollToBottom('auto')
+    }
+  }, [streamingText])
+
   // 滚动事件监听：区分用户主动滚动和自动滚动
   useEffect(() => {
     const el = messagesAreaRef.current
@@ -157,7 +165,13 @@ function ChatArea({
             <Message key={message.id} message={message} status={getMessageStatus(message, index, chat.messages)} />
           ))
         )}
-        {isTyping && <TypingIndicator />}
+        {/* 流式回复气泡：AI 正在生成、尚未写库时实时展示 */}
+        {streamingText && (
+          <div className="message assistant">
+            <div className="message-content">{streamingText}</div>
+          </div>
+        )}
+        {isTyping && !streamingText && <TypingIndicator />}
         <div ref={messagesEndRef} />
       </div>
       {/* 新消息提示浮动按钮 */}

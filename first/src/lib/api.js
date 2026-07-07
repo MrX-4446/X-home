@@ -327,6 +327,83 @@ export async function chatWithAI({ chatId, system, messages, model, temperature,
   }
 }
 
+/**
+ * 流式调用 AI（SSE）。通过回调实时接收增量文本。
+ * @param {object} params 与 chatWithAI 相同的入参
+ * @param {object} handlers { onDelta(textChunk), onTool(toolResults), onStatus(text) }
+ * @returns {Promise<{reply, toolResults}>} 完整回复（累积结果）
+ */
+export async function chatWithAIStream(
+  { chatId, system, messages, model, temperature, maxTokens, topP, deepThinking, tools },
+  { onDelta, onTool, onStatus } = {}
+) {
+  const url = getApiUrl('/api/chat/stream')
+  let reply = ''
+  let toolResults = []
+
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chatId, system, messages, model, temperature, maxTokens, topP, deepThinking, tools }),
+    })
+
+    if (!resp.ok || !resp.body) {
+      throw new Error(`HTTP ${resp.status}`)
+    }
+
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder('utf-8')
+    let buffer = ''
+
+    // 逐块读取 SSE 流，按 \n\n 分隔事件
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+
+      let sepIndex
+      while ((sepIndex = buffer.indexOf('\n\n')) !== -1) {
+        const rawEvent = buffer.slice(0, sepIndex)
+        buffer = buffer.slice(sepIndex + 2)
+
+        const dataLine = rawEvent.split('\n').find(l => l.startsWith('data:'))
+        if (!dataLine) continue
+        let evt
+        try {
+          evt = JSON.parse(dataLine.slice(5).trim())
+        } catch {
+          continue
+        }
+
+        if (evt.type === 'delta') {
+          reply += evt.text
+          onDelta?.(evt.text, reply)
+        } else if (evt.type === 'tool') {
+          toolResults = evt.toolResults || []
+          onTool?.(toolResults)
+        } else if (evt.type === 'status') {
+          onStatus?.(evt.text)
+        } else if (evt.type === 'done') {
+          reply = evt.reply ?? reply
+          toolResults = evt.toolResults || toolResults
+        } else if (evt.type === 'error') {
+          throw new Error(evt.error || '流式回复出错')
+        }
+      }
+    }
+
+    return { reply, toolResults }
+  } catch (err) {
+    // 已经产生的部分内容保留，附加错误提示
+    return {
+      reply: reply || `（AI 暂时无法回复：${err.message}）`,
+      toolResults,
+      error: err.message,
+    }
+  }
+}
+
 // ===== 记忆系统 API =====
 
 export async function getMemories(params = {}) {
@@ -494,6 +571,31 @@ export async function bulkUploadNotes(notes) {
   } catch (err) {
     console.error('批量上传读书笔记失败:', err)
     return null
+  }
+}
+
+// ===== 数据导入/导出 API =====
+
+export async function exportData() {
+  try {
+    // 返回完整备份对象（含 version/exportedAt/data），用于下载与恢复
+    return await request('/api/export')
+  } catch (err) {
+    console.error('导出数据失败:', err)
+    return null
+  }
+}
+
+export async function importData(backup) {
+  try {
+    // backup 可以是完整备份对象（含 data 字段），后端会自动识别
+    return await request('/api/import', {
+      method: 'POST',
+      body: JSON.stringify(backup),
+    })
+  } catch (err) {
+    console.error('导入数据失败:', err)
+    throw err
   }
 }
 
