@@ -35,8 +35,7 @@ d:\X\
 │   ├── base-rules.md   # AI 底层规则
 │   └── package.json
 ├── DEPLOYMENT_GUIDE.md # 部署指南
-├── QUICK_START.md      # 快速开始
-└── deploy.sh          # 自动化部署脚本
+└── QUICK_START.md      # 快速开始
 ```
 
 ## 🚀 本地开发

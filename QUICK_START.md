@@ -105,18 +105,6 @@ server {
 
 ---
 
-## 📦 方式二：脚本自动部署
-
-1. 上传 `deploy.sh` 到服务器根目录
-2. 执行：
-
-```bash
-chmod +x deploy.sh
-bash deploy.sh
-```
-
----
-
 ## ✅ 验证部署
 
 ### 1. 检查后端状态

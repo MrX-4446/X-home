@@ -3,6 +3,7 @@
   "appName": "X · 阅读伙伴",
   "webDir": "dist",
   "server": {
+    "url": "http://38.92.8.134",
     "cleartext": true,
     "androidScheme": "http"
   }
