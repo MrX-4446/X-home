@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- maskable 图标：内容居中并留出安全边距，防止被系统裁切 -->
+  <rect width="512" height="512" fill="#1a1a1a"/>
+  <text x="256" y="315" font-family="'Noto Serif SC', serif" font-size="220" font-weight="600" fill="#e8c07d" text-anchor="middle">X</text>
+</svg>
