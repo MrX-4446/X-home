@@ -1,0 +1,9 @@
+{
+  "appId": "com.x.readingpartner",
+  "appName": "X · 阅读伙伴",
+  "webDir": "dist",
+  "server": {
+    "cleartext": true,
+    "androidScheme": "http"
+  }
+}
