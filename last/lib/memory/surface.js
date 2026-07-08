@@ -5,7 +5,46 @@
 // =============================================================
 
 const { readStorage, getSetting } = require('../storage')
-const { getRelatedChatIds, calculateTextSimilarity } = require('./core')
+const { getRelatedChatIds, calculateTextSimilarity, tokenize } = require('./core')
+
+// 粗筛开关：记忆数超过此值才启用「关键词/标签粗筛」，否则全量打分（量小时无需筛）
+const PREFILTER_MIN_TOTAL = 40
+// 粗筛后候选数下限：若命中候选过少，回退全量，避免漏召回
+const PREFILTER_MIN_CANDIDATES = 20
+
+// 关键词/标签粗筛：保留与用户消息有词/标签重叠的记忆，
+// 同时强制保留置顶、结构化事实、高重要度记忆（保底不漏）。
+// 命中候选过少或无有效查询时，返回全量。
+function prefilterMemories(memories, userMessage, limit) {
+  if (!userMessage || userMessage.length <= 5) return memories
+  if (memories.length < PREFILTER_MIN_TOTAL) return memories
+
+  const queryTokens = new Set(tokenize(userMessage).filter(t => t.length >= 1))
+  if (queryTokens.size === 0) return memories
+
+  const candidates = memories.filter(mem => {
+    // 保底：置顶 / 结构化事实 / 高重要度 一律保留，绝不因粗筛被丢
+    if (mem.is_pinned || mem.source === 'fact' || (mem.importance || 0) >= 8) return true
+    // 内容或标签与查询有任意词重叠即入选
+    const memTokens = new Set(tokenize(mem.content))
+    for (const t of queryTokens) {
+      if (memTokens.has(t)) return true
+    }
+    const tags = Array.isArray(mem.tags) ? mem.tags : []
+    for (const tag of tags) {
+      const tagTokens = tokenize(tag)
+      if (tagTokens.some(t => queryTokens.has(t))) return true
+    }
+    return false
+  })
+
+  // 候选太少可能漏召回，回退全量交给打分层
+  const floor = Math.max(PREFILTER_MIN_CANDIDATES, limit * 3)
+  if (candidates.length < floor) return memories
+
+  console.log(`[记忆粗筛] ${memories.length} → ${candidates.length} 条候选`)
+  return candidates
+}
 
 // ---------- 6. 混合记忆检索（规则 + 语义） ----------
 async function surfaceMemoriesEnhanced(chatId, userMessage = '', limit = 10) {
@@ -21,6 +60,9 @@ async function surfaceMemoriesEnhanced(chatId, userMessage = '', limit = 10) {
 
   const globalMems = (readStorage('memories') || []).filter(m => !m.chat_id && m.is_active)
   allMemories.push(...globalMems)
+
+  // 关键词/标签粗筛：先缩小候选集再打分，减少全量遍历与发送量（保底不漏）
+  allMemories = prefilterMemories(allMemories, userMessage, limit)
 
   const decayRate = parseFloat(getSetting('memory_decay_rate') || '0.01')
   const now = new Date()

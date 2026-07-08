@@ -24,6 +24,7 @@ function SettingsPanel({ onClose, onSave }) {
     top_p: '0.9',
     memory_threshold: '3000',
     keep_recent_messages: '10',
+    deep_thinking: false,
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -177,6 +178,20 @@ function SettingsPanel({ onClose, onSave }) {
                   className="settings-input"
                 />
               </div>
+            </div>
+
+            <div className="settings-item settings-toggle-row">
+              <div>
+                <label className="settings-label">深度思考</label>
+                <p className="settings-hint">开启后模型会先推理再回答，回复更严谨但速度较慢、消耗更多 token</p>
+              </div>
+              <button
+                type="button"
+                className={`tool-toggle ${(settings.deep_thinking === true || settings.deep_thinking === 'true') ? 'on' : ''}`}
+                onClick={() => handleChange('deep_thinking', !(settings.deep_thinking === true || settings.deep_thinking === 'true'))}
+              >
+                <span className="toggle-thumb"></span>
+              </button>
             </div>
           </div>
 

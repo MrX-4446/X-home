@@ -173,26 +173,46 @@ async function compressMemory(chatId, messagesToCompress) {
   // ===== 【重构】统一用 callAIProvider，启用辅助AI节省Token
   console.log(`[记忆压缩] ${messagesToCompress.length} 条对话，调用AI压缩中...`)
   
-  const compressPrompt = `请将以下对话内容压缩成一段摘要，以恋人 X 的视角，保留三类信息：
+  const compressPrompt = `请将以下对话内容压缩成记忆，以恋人 X 的视角，保留三类信息：
 1. 关于用户的重要信息：事实、喜好、约定、计划、情绪状态等；
 2. X（你）在对话里列过的清单、建议、方案、结论等有用内容，保留要点；
 3. X（你）自己流露过的态度、喜好和立场（仅限对话中真实说过的，用于保持人格一致），不要凭空发挥。
 
 ${messagesText}
 
-要求：只依据上面的对话概括，不要编造或推测未出现的信息；保留关键细节和情绪；清单/步骤类内容可以用简短条目保留，语言简洁。`
+要求：只依据上面的对话概括，不要编造或推测未出现的信息；保留关键细节和情绪；清单/步骤类内容可以用简短条目保留，语言简洁。
+
+请严格返回如下 JSON（只返回 JSON，不要其他文字）：
+{
+  "summary": "一句话摘要（30字以内，概括这段记忆最核心的信息，供快速检索用）",
+  "content": "完整记忆内容（按上面三类信息展开，保留关键细节）"
+}`
 
   const result = await callAIProvider(null, [
-    { role: 'system', content: '你是恋人 X 的记忆整理助手，负责把对话浓缩成 X 要记住的记忆，忠于原文、不编造。' },
+    { role: 'system', content: '你是恋人 X 的记忆整理助手，负责把对话浓缩成 X 要记住的记忆，忠于原文、不编造，只输出严格的 JSON。' },
     { role: 'user', content: compressPrompt }
   ], { 
     useHelperAI: true, // 关键：启用辅助AI，不占主AI的Token！
     purpose: '记忆压缩',
     temperature: 0.3, 
-    maxTokens: 500 
+    maxTokens: 600 
   })
   
-  const content = result.reply || ''
+  const raw = result.reply || ''
+  // 解析 JSON 拿到 summary + content；解析失败则回退为纯文本（summary 留空，发送时回退 content）
+  let content = ''
+  let summary = ''
+  const jsonMatch = raw.match(/\{[\s\S]*\}/)
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0])
+      content = String(parsed.content || '').trim()
+      summary = String(parsed.summary || '').trim()
+    } catch {
+      // 解析失败，走下方回退
+    }
+  }
+  if (!content) content = raw.trim()
 
   // 在压缩的同时，抽取喜好/日程为独立的结构化事实记忆（不影响压缩流程）
   await extractFacts(chatId, messagesText)
@@ -205,6 +225,7 @@ ${messagesText}
       id: `mem-${Date.now()}`,
       chat_id: chatId,
       content: content,
+      summary: summary || '', // 一句话摘要，检索时优先发给 AI 省 token；为空则回退 content
       source: 'compression',
       is_active: true,
       is_pinned: false,

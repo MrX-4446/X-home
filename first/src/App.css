@@ -356,6 +356,78 @@ body {
 
 /* 新消息提示浮动按钮 - 智能滚动功能
    当用户向上浏览历史消息时，收到新消息会显示此按钮 */
+/* 思考链折叠面板：深度思考模型生成期间实时展示 */
+.reasoning-panel {
+  max-width: 80%;
+  margin: 4px 0 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: rgba(122, 138, 153, 0.06);
+  overflow: hidden;
+}
+
+.reasoning-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--primary-warm-gray-blue-dark);
+  font-weight: 500;
+  text-align: left;
+}
+
+.reasoning-toggle-icon {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.reasoning-content {
+  padding: 10px 14px 12px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-top: 1px dashed var(--border-color);
+}
+
+/* 停止生成按钮 */
+.stop-generating-row {
+  display: flex;
+  justify-content: center;
+  margin: 8px 0 4px;
+}
+
+.stop-generating-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 16px;
+  background: var(--bg-color, #fff);
+  color: var(--primary-warm-gray-blue-dark);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.stop-generating-btn:hover {
+  background: rgba(122, 138, 153, 0.1);
+}
+
+.stop-icon {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
 .new-message-btn {
   position: absolute;
   bottom: 100px;
@@ -2828,7 +2900,7 @@ select.ai-form-input option:first-child {
 
 .memory-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
   gap: 16px;
 }
 
@@ -3042,12 +3114,27 @@ select.ai-form-input option:first-child {
 
 .settings-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
   gap: 20px;
 }
 
 .settings-item {
   margin-bottom: 20px;
+}
+
+.settings-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-toggle-row .settings-hint {
+  margin-top: 4px;
+}
+
+.settings-toggle-row .tool-toggle {
+  flex-shrink: 0;
 }
 
 .settings-label {
@@ -3139,7 +3226,7 @@ select.ai-form-input option:first-child {
   background-color: var(--background-card);
   border-radius: 20px;
   padding: 32px;
-  min-width: 360px;
+  min-width: min(360px, 88vw);
   max-width: 90%;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
   animation: modalSlideUp 0.25s ease-out;
@@ -3862,8 +3949,8 @@ select.ai-form-input option:first-child {
 
 .emotion-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 20px;
-  height: 20px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   background-color: white;
   border: 2px solid #3b82f6;
@@ -3890,8 +3977,8 @@ select.ai-form-input option:first-child {
 }
 
 .emotion-slider::-moz-range-thumb {
-  width: 20px;
-  height: 20px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   background-color: white;
   border: 2px solid #3b82f6;
@@ -6040,15 +6127,20 @@ html {
   }
   
   .action-btn {
-    width: 32px;
-    height: 32px;
+    width: 40px;
+    height: 40px;
     border-radius: 10px;
   }
   
   .send-btn {
-    width: 36px;
-    height: 36px;
+    width: 40px;
+    height: 40px;
     border-radius: 10px;
+  }
+  
+  /* 首页模块网格：窄屏降为 2 列，避免 3 列文字挤压 */
+  .modules-grid {
+    grid-template-columns: repeat(2, 1fr);
   }
   
   /* 侧边栏小屏优化 */
@@ -6583,5 +6675,164 @@ html {
   color: var(--text-muted);
   margin-top: 4px;
   line-height: 1.5;
+}
+
+/* ===== 排班表 / 工作日标注 ===== */
+.cal-header-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: var(--background-soft);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.cal-header-icon-btn:hover {
+  color: var(--text-primary);
+  background: var(--background-card);
+}
+.cal-header-icon-btn.active {
+  color: #fff;
+  background: var(--primary-warm-gray-blue);
+  border-color: var(--primary-warm-gray-blue);
+}
+
+/* 批量排班操作条 */
+.cal-batch-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: var(--background-soft);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+.cal-batch-hint {
+  font-size: 13px;
+  color: var(--text-secondary);
+  flex: 1;
+  min-width: 140px;
+}
+.cal-batch-select {
+  height: 32px;
+  padding: 0 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--background-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+.cal-batch-apply {
+  height: 32px;
+  padding: 0 16px;
+  font-size: 13px;
+  color: #fff;
+  background: var(--primary-warm-gray-blue);
+  border: none;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+}
+.cal-batch-apply:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 日历格子内的班次标记 */
+.cal-shift-badge {
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 1px 5px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: #fff;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+.cal-cell.batch-selected {
+  outline: 2px solid var(--primary-warm-gray-blue);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+}
+
+/* 当日面板班次选择 */
+.cal-day-shifts {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+.cal-day-shifts-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.cal-shift-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cal-shift-chip {
+  padding: 4px 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: var(--background-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.cal-shift-chip.active {
+  font-weight: 600;
+}
+
+/* 班次类型管理 */
+.cal-type-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.cal-type-color {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.cal-type-name {
+  flex: 1;
+  min-width: 60px;
+}
+.cal-type-time {
+  width: 84px;
+  flex-shrink: 0;
+}
+.cal-type-sep {
+  color: var(--text-muted);
+}
+.cal-type-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--primary-warm-gray-blue);
+  background: var(--background-soft);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-full);
+  cursor: pointer;
 }
 

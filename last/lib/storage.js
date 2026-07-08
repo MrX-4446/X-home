@@ -42,6 +42,10 @@ function log(level, message) {
 }
 
 // ---------- 键值存储（底层为 SQLite，接口保持同步不变）----------
+// ⚠️ 数据存取的唯一入口：所有业务代码必须只通过 readStorage/writeStorage 存取，
+//    禁止绕过本层直接写 SQL 或直接读写 .local-storage 文件。
+//    这样将来若要把 memories 等大数据升级为「行结构化 + 向量检索」（见《优化清单》第 6 项），
+//    只需在本文件内给对应 key 单独换实现（其它 key 继续走 kv 表），业务代码一行不用动。
 function readStorage(key) {
   const row = _selectStmt.get(key)
   if (!row) return null

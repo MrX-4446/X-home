@@ -390,6 +390,47 @@ function ReadingPartner({ onClose, onSendMessage }) {
           font-weight: 600;
           color: #4A4036;
         }
+
+        /* ===== 窄屏手机适配 ===== */
+        @media (max-width: 600px) {
+          .reading-main {
+            justify-content: flex-start;
+            padding: 24px 20px;
+          }
+          .reading-title-section {
+            margin-top: 8px;
+            margin-bottom: 32px;
+          }
+          .reading-main-title {
+            font-size: 26px;
+          }
+          .reading-buttons {
+            flex-direction: column;
+            gap: 20px;
+            width: 100%;
+            max-width: 100%;
+            align-items: center;
+          }
+          .reading-card-btn {
+            width: 100%;
+            max-width: 360px;
+            height: auto;
+            min-height: 160px;
+            padding: 28px 20px;
+          }
+          .card-icon {
+            width: 60px;
+            height: 60px;
+            font-size: 28px;
+            margin-bottom: 16px;
+          }
+          .sub-page-header {
+            padding: 16px;
+          }
+          .reading-footer {
+            padding: 20px 16px;
+          }
+        }
       `}</style>
 
       {/* 头部 */}

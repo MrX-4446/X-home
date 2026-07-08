@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <g fill="#5A6A79">
+    <!-- 主笔（粗）左上 -> 右下 -->
+    <polygon points="300,300 388,300 724,724 636,724"/>
+    <!-- 副笔（细）右上 -> 左下 -->
+    <polygon points="724,300 668,300 300,724 356,724"/>
+    <!-- 四端衬线脚 -->
+    <rect x="274" y="290" width="140" height="26" rx="4"/>
+    <rect x="626" y="290" width="140" height="26" rx="4"/>
+    <rect x="258" y="708" width="140" height="26" rx="4"/>
+    <rect x="610" y="708" width="140" height="26" rx="4"/>
+  </g>
+</svg>

@@ -43,6 +43,10 @@ function App() {
   const [isTyping, setIsTyping] = useState(false)
   // 流式回复中正在生成的文本（AI 未写库前，用于实时展示打字机效果）
   const [streamingText, setStreamingText] = useState('')
+  // 流式思考链（深度思考模型的 reasoning_content），仅生成期间展示，不写库
+  const [streamingReasoning, setStreamingReasoning] = useState('')
+  // 持有当前流式请求的 AbortController，供「终止」按钮中断
+  const abortControllerRef = useRef(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [currentPage, setCurrentPage] = useState('home')
   const [loading, setLoading] = useState(true)
@@ -201,6 +205,57 @@ function App() {
     }
   }, [])
 
+  // ===== 系统返回 / 侧滑手势接管（Android 全面屏边缘侧滑与返回键都触发此逻辑）=====
+  // 优先级：从最上层的面板往下关，全部关完且在首页时才允许退出 App。
+  // 用 ref 持有最新的处理函数，避免 backButton 监听闭包捕获到过期状态。
+  const backHandlerRef = useRef(() => false)
+  backHandlerRef.current = () => {
+    // 返回 true 表示「已消费本次返回」，false 表示「已到最外层，可退出 App」
+    if (aiConfigOpen) {
+      setAIConfigOpen(false)
+      if (returnToAppSettings) {
+        setAppSettingsOpen(true)
+        setReturnToAppSettings(false)
+      }
+      return true
+    }
+    if (settingsOpen) { setSettingsOpen(false); return true }
+    if (appSettingsOpen) { setAppSettingsOpen(false); return true }
+    if (toolConfigOpen) { setToolConfigOpen(false); return true }
+    if (memoryOpen) { setMemoryOpen(false); return true }
+    if (diaryOpen) { setDiaryOpen(false); return true }
+    if (appCheckOpen) { setAppCheckOpen(false); return true }
+    if (calendarOpen) { setCalendarOpen(false); return true }
+    if (readingOpen) { setReadingOpen(false); return true }
+    if (sidebarOpen) { setSidebarOpen(false); return true }
+    if (currentPage === 'chat') { setCurrentPage('home'); return true }
+    return false
+  }
+
+  // 注册 Capacitor 返回键监听（仅打包为 APK 时生效；浏览器环境无此模块，动态导入失败即静默降级）
+  useEffect(() => {
+    let removeListener = null
+    let cancelled = false
+    import('@capacitor/app')
+      .then(({ App: CapApp }) => {
+        if (cancelled) return
+        CapApp.addListener('backButton', () => {
+          const consumed = backHandlerRef.current()
+          if (!consumed) CapApp.exitApp()
+        }).then((handle) => {
+          if (cancelled) handle.remove()
+          else removeListener = () => handle.remove()
+        })
+      })
+      .catch(() => {
+        // 非 Capacitor 环境（浏览器 dev / 预览）：无 @capacitor/app，忽略即可
+      })
+    return () => {
+      cancelled = true
+      if (removeListener) removeListener()
+    }
+  }, [])
+
   const formatTime = (dateString) => {
     if (!dateString) return '刚刚'
     const date = new Date(dateString)
@@ -263,6 +318,9 @@ function App() {
 
       // 3) 调用后端 AI 流式接口，边接收边展示打字机效果
       setStreamingText('')
+      setStreamingReasoning('')
+      const controller = new AbortController()
+      abortControllerRef.current = controller
       const aiResult = await chatWithAIStream({
         chatId: chatId,
         system: settings.system_prompt || '',
@@ -271,7 +329,7 @@ function App() {
         temperature: parseFloat(settings.temperature) || aiConfig.temperature,
         maxTokens: parseInt(settings.max_tokens) || aiConfig.maxTokens,
         topP: parseFloat(settings.top_p) || aiConfig.topP,
-        deepThinking: aiConfig.deepThinking,
+        deepThinking: settings.deep_thinking === true || settings.deep_thinking === 'true',
         tools: toolList.filter(tool => tool.enabled),
       }, {
         // 每收到一段增量就累积展示（isTyping 保持为真，直到回复保存完成，
@@ -279,6 +337,11 @@ function App() {
         onDelta: (_chunk, full) => {
           setStreamingText(full)
         },
+        // 思考链增量：累积展示在折叠面板
+        onReasoning: (chunk) => {
+          setStreamingReasoning(prev => prev + chunk)
+        },
+        signal: controller.signal,
       })
 
       const toolMetadata = aiResult.toolResults?.length
@@ -286,15 +349,18 @@ function App() {
         : ''
 
       // 4) 保存 AI 回复并刷新（清空流式临时文本，改由数据库消息渲染）
-      await sendMessageDB({
-        chat_id: chatId,
-        role: 'assistant',
-        content: `${aiResult.reply || '（AI 没有返回内容）'}${toolMetadata}`,
-      })
+      //    用户中途终止且没有产出任何正文时，不保存空消息
+      if (!(aiResult.aborted && !aiResult.reply)) {
+        await sendMessageDB({
+          chat_id: chatId,
+          role: 'assistant',
+          content: `${aiResult.reply || '（AI 没有返回内容）'}${toolMetadata}`,
+        })
 
-      await updateChatDB(chatId, {
-        preview: userText.substring(0, 30) + (userText.length > 30 ? '...' : ''),
-      })
+        await updateChatDB(chatId, {
+          preview: userText.substring(0, 30) + (userText.length > 30 ? '...' : ''),
+        })
+      }
       await loadMessages(chatId)
       await loadChats(true)
     } catch (err) {
@@ -304,7 +370,16 @@ function App() {
     } finally {
       // 无论成功或失败，都解除“正在输入”状态并清空流式临时文本
       setStreamingText('')
+      setStreamingReasoning('')
+      abortControllerRef.current = null
       setIsTyping(false)
+    }
+  }
+
+  // 终止当前正在生成的 AI 回复（中断流式请求）
+  const handleStopGenerating = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
     }
   }
 
@@ -435,6 +510,8 @@ function App() {
             onKeyPress={handleKeyPress}
             isTyping={isTyping}
             streamingText={streamingText}
+            streamingReasoning={streamingReasoning}
+            onStopGenerating={handleStopGenerating}
             selectedModel={selectedModel}
             models={aiList.filter(ai => ai.enabled)}
             onModelChange={setSelectedModel}

@@ -78,6 +78,15 @@ const {
   setupReminderTask,
 } = require('./lib/memory/schedule')
 
+// 排班表 / 工作日标注（班次类型 + 每日排班 + 上下文注入）已抽离到 lib/memory/shifts.js
+const {
+  loadShiftTypes,
+  replaceShiftTypes,
+  listShifts,
+  setShift,
+  buildShiftContext,
+} = require('./lib/memory/shifts')
+
 function generateMessageId(baseTime, index) {
   return `msg-${baseTime}-${index}-${Math.random().toString(36).slice(2, 8)}`
 }
@@ -206,7 +215,7 @@ async function prepareChatMessages(chatId, newMessages) {
   if (relevantMemories.length > 0) {
     memoryContext = `\n【重要记忆回顾】
 以下是你需要记住的关于轩的重要信息（恋人X的视角）：
-${relevantMemories.map((m, i) => `${i + 1}. ${m.content}`).join('\n')}
+${relevantMemories.map((m, i) => `${i + 1}. ${m.summary || m.content}`).join('\n')}
 仅当与当前话题相关时才自然带出，不必刻意使用；不确定的内容不要当成事实，更不要编造。
 `
     console.log(`[记忆加载] 成功加载 ${relevantMemories.length} 条相关记忆（过滤前: ${sortedMemories.length}）`)
@@ -247,7 +256,8 @@ ${relevantMemories.map((m, i) => `${i + 1}. ${m.content}`).join('\n')}
 以上时间仅供你参考，除非与话题相关或轩主动提及，否则不必主动提起时间或作息。
 `
   const scheduleContext = buildScheduleContext()
-  const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}\n\n${memoryContext}\n\n${scheduleContext}\n\n${timeContext}` : userSystemPrompt
+  const shiftContext = buildShiftContext()
+  const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}\n\n${memoryContext}\n\n${scheduleContext}\n\n${shiftContext}\n\n${timeContext}` : userSystemPrompt
 
   // 创建消息副本，不修改原始消息（避免污染数据库）
   const messagesCopy = newMessages
@@ -542,6 +552,7 @@ ${messagesText}
         top_p: savedSettings.top_p || '0.9',
         memory_threshold: savedSettings.memory_threshold || '3000',
         keep_recent_messages: savedSettings.keep_recent_messages || '30',
+        deep_thinking: savedSettings.deep_thinking || false,
       }
       return sendJson(res, 200, { data: settings })
     }
@@ -557,7 +568,7 @@ ${messagesText}
     // ===== AI 对话 API（流式 SSE） =====
     if (pathname === '/api/chat/stream' && req.method === 'POST') {
       const body = await readBody(req)
-      const { chatId, messages: newMessages, model: selectedProviderId } = body
+      const { chatId, messages: newMessages, model: selectedProviderId, deepThinking = false } = body
 
       if (!chatId || !newMessages || newMessages.length === 0) {
         return sendJson(res, 400, { error: '缺少必要参数' })
@@ -582,8 +593,8 @@ ${messagesText}
         const firstResult = await callAIProviderStream(
           selectedProviderId,
           messagesCopy,
-          { tools: toolDefinitions, purpose: '主聊天' },
-          (delta) => sse({ type: 'delta', text: delta })
+          { tools: toolDefinitions, deepThinking, purpose: '主聊天' },
+          (delta, kind) => sse(kind === 'reasoning' ? { type: 'reasoning', text: delta } : { type: 'delta', text: delta })
         )
 
         let finalReply = firstResult.reply
@@ -612,8 +623,8 @@ ${messagesText}
           const secondResult = await callAIProviderStream(
             selectedProviderId,
             messagesCopy,
-            { purpose: '主聊天工具结果总结' },
-            (delta) => sse({ type: 'delta', text: delta })
+            { deepThinking, purpose: '主聊天工具结果总结' },
+            (delta, kind) => sse(kind === 'reasoning' ? { type: 'reasoning', text: delta } : { type: 'delta', text: delta })
           )
           finalReply = secondResult.reply
         }
@@ -683,7 +694,7 @@ ${messagesText}
           if (relevantMemories.length > 0) {
             memoryContext = `\n【重要记忆回顾】
 以下是你需要记住的关于轩的重要信息（恋人X的视角）：
-${relevantMemories.map((m, i) => `${i + 1}. ${m.content}`).join('\n')}
+${relevantMemories.map((m, i) => `${i + 1}. ${m.summary || m.content}`).join('\n')}
 仅当与当前话题相关时才自然带出，不必刻意使用；不确定的内容不要当成事实，更不要编造。
 `
             console.log(`[记忆加载] 成功加载 ${relevantMemories.length} 条相关记忆（过滤前: ${sortedMemories.length}）`)
@@ -727,7 +738,8 @@ ${relevantMemories.map((m, i) => `${i + 1}. ${m.content}`).join('\n')}
 以上时间仅供你参考，除非与话题相关或轩主动提及，否则不必主动提起时间或作息。
 `
           const scheduleContext = buildScheduleContext()
-          const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}\n\n${memoryContext}\n\n${scheduleContext}\n\n${timeContext}` : userSystemPrompt
+          const shiftContext = buildShiftContext()
+          const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}\n\n${memoryContext}\n\n${scheduleContext}\n\n${shiftContext}\n\n${timeContext}` : userSystemPrompt
 
           // 【关键修复】创建消息副本，不修改原始消息（避免污染数据库）
           const messagesCopy = newMessages
@@ -1296,6 +1308,37 @@ ${messagesText}
       return sendJson(res, 200, { ok: true })
     }
 
+    // ===== 排班表 / 工作日标注 =====
+    // 班次类型
+    if (pathname === '/api/shift-types' && req.method === 'GET') {
+      return sendJson(res, 200, { data: loadShiftTypes() })
+    }
+
+    if (pathname === '/api/shift-types' && req.method === 'PUT') {
+      const body = await readBody(req)
+      const list = Array.isArray(body) ? body : (body && body.types)
+      if (!Array.isArray(list)) {
+        return sendJson(res, 400, { error: '班次类型需为数组' })
+      }
+      return sendJson(res, 200, { data: replaceShiftTypes(list) })
+    }
+
+    // 每日排班
+    if (pathname === '/api/shift' && req.method === 'GET') {
+      const month = url.searchParams.get('month') || null
+      return sendJson(res, 200, { data: listShifts(month) })
+    }
+
+    if (pathname === '/api/shift' && req.method === 'POST') {
+      const body = await readBody(req)
+      if (!body || !body.date) {
+        return sendJson(res, 400, { error: '缺少日期 date' })
+      }
+      // date 可为字符串或数组；typeId 为空表示清除
+      const map = setShift(body.date, body.typeId || null)
+      return sendJson(res, 200, { data: map })
+    }
+
     // ===== 数据备份：导出全部本地 JSON =====
     if (pathname === '/api/export' && req.method === 'GET') {
       const keys = listStorageKeys()
@@ -1373,6 +1416,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('  POST /api/diary/compile    (手动触发日记整理)')
   console.log('  GET  /api/diary/status     (查看日记状态)')
   console.log('  GET/POST/PUT/DELETE /api/schedule  (日程/日历)')
+  console.log('  GET/POST /api/shift, GET/PUT /api/shift-types  (排班表)')
   
   setupDailyDiaryTask()
   setupProactiveTask()

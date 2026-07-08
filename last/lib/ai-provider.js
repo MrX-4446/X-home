@@ -149,6 +149,47 @@ function resolveProviderAndKey(provider, useHelperAI) {
   return { aiProvider, apiKey }
 }
 
+// ---------- 深度思考参数适配 ----------
+// 各厂商开启「深度思考 / 推理」的请求字段写法不同，这里按 endpoint / model 自动适配。
+// 只有在 deepThinking 为 true 时才注入；关闭时不加任何字段，避免对不支持的模型报错。
+// 新增厂商时在此补充规则即可，业务代码无需改动。
+function applyDeepThinking(requestBody, aiProvider, deepThinking) {
+  if (!deepThinking) return requestBody
+
+  const endpoint = String(aiProvider?.endpoint || '').toLowerCase()
+  const model = String(aiProvider?.model || '').toLowerCase()
+
+  // DeepSeek：思考模式靠「切换模型名」实现，不是靠参数。
+  // deepseek-chat = V3.2 非思考模式；deepseek-reasoner = V3.2 思考模式（底层同一模型）。
+  // 开启深度思考时把 chat 换成 reasoner；reasoner 思考模式不支持 temperature/top_p，需删掉避免报错。
+  if (endpoint.includes('deepseek') || model.startsWith('deepseek')) {
+    if (model === 'deepseek-chat') {
+      requestBody.model = 'deepseek-reasoner'
+      delete requestBody.temperature
+      delete requestBody.top_p
+    }
+    // 已是 reasoner（或其它 deepseek 推理模型）则本身就在思考，无需处理
+    return requestBody
+  }
+
+  // 通义千问 qwen3 系列：enable_thinking: true
+  if (endpoint.includes('dashscope') || model.startsWith('qwen')) {
+    requestBody.enable_thinking = true
+    return requestBody
+  }
+
+  // OpenAI o 系列 / gpt-5 推理模型：reasoning_effort
+  if (model.startsWith('o1') || model.startsWith('o3') || model.startsWith('o4') || model.startsWith('gpt-5')) {
+    requestBody.reasoning_effort = 'medium'
+    return requestBody
+  }
+
+  // 火山方舟 / 豆包、智谱 GLM，以及其它未收录厂商：thinking: { type: 'enabled' }
+  // （豆包官方格式，作为默认兜底）
+  requestBody.thinking = { type: 'enabled' }
+  return requestBody
+}
+
 // ---------- AI API 调用（OpenAI 兼容格式） ----------
 async function callAIProvider(provider, messages, options = {}) {
   const { tools = null, temperature, maxTokens, topP, useHelperAI = false, purpose = '主聊天' } = options
@@ -218,11 +259,11 @@ async function callAIProvider(provider, messages, options = {}) {
 // 返回值与 callAIProvider 一致：{ ok, reply, message, toolCalls }，
 // 便于复用后续的工具调用流程（工具调用不走增量展示，整体累积后返回）。
 async function callAIProviderStream(provider, messages, options = {}, onDelta) {
-  const { tools = null, temperature, maxTokens, topP, useHelperAI = false, purpose = '主聊天' } = options
+  const { tools = null, temperature, maxTokens, topP, deepThinking = false, useHelperAI = false, purpose = '主聊天' } = options
 
   const { aiProvider, apiKey } = resolveProviderAndKey(provider, useHelperAI)
 
-  console.log(`[AI流式调用] 类型: ${purpose}，模型: ${aiProvider.model}`)
+  console.log(`[AI流式调用] 类型: ${purpose}，模型: ${aiProvider.model}，深度思考: ${deepThinking ? '开' : '关'}`)
 
   const requestBody = {
     model: aiProvider.model,
@@ -232,6 +273,8 @@ async function callAIProviderStream(provider, messages, options = {}, onDelta) {
     top_p: topP ?? parseFloat(getSetting('top_p') || '0.9'),
     stream: true,
   }
+
+  applyDeepThinking(requestBody, aiProvider, deepThinking)
 
   if (tools && tools.length > 0) {
     requestBody.tools = tools
@@ -283,9 +326,15 @@ async function callAIProviderStream(provider, messages, options = {}, onDelta) {
       if (!choice) continue
       const delta = choice.delta || {}
 
+      // 深度思考模型（如 deepseek-reasoner）的思考链走独立字段 reasoning_content，
+      // 与正文 content 分开推送，前端可单独展示（折叠面板）。
+      if (delta.reasoning_content) {
+        if (typeof onDelta === 'function') onDelta(delta.reasoning_content, 'reasoning')
+      }
+
       if (delta.content) {
         fullContent += delta.content
-        if (typeof onDelta === 'function') onDelta(delta.content)
+        if (typeof onDelta === 'function') onDelta(delta.content, 'content')
       }
 
       // 累积工具调用分片

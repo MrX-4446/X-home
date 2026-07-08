@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getSchedules, addSchedule, updateSchedule, deleteSchedule } from '../lib/api'
+import { getSchedules, addSchedule, updateSchedule, deleteSchedule, getShiftTypes, saveShiftTypes, getShifts, setShift } from '../lib/api'
 
 // 返回图标
 const BackIcon = () => (
@@ -50,6 +50,14 @@ const TrashIcon = () => (
 
 const REPEAT_LABELS = { none: '不重复', daily: '每天', weekly: '每周', monthly: '每月' }
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
+const SHIFT_COLORS = ['#7BA7BC', '#8B7BBC', '#8FB88F', '#C9A97B', '#C98B8B', '#7BBCB0', '#B08BC9', '#9AA7B5']
+
+const SettingsIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="3" />
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+  </svg>
+)
 
 // 北京时间「YYYY-MM-DD」
 function beijingDateStr(date = new Date()) {
@@ -96,10 +104,23 @@ function CalendarPanel({ onClose }) {
   const [isSaving, setIsSaving] = useState(false)
   const [deletingId, setDeletingId] = useState(null)
 
+  // ===== 排班 =====
+  const [shiftTypes, setShiftTypes] = useState([])
+  const [shifts, setShifts] = useState({}) // { 'YYYY-MM-DD': typeId }
+  // 批量排班模式
+  const [batchMode, setBatchMode] = useState(false)
+  const [batchDays, setBatchDays] = useState([]) // 选中的日期数组
+  const [batchType, setBatchType] = useState('') // 要标记的班次类型 id（空=清除）
+  // 班次类型管理弹窗
+  const [showTypeManager, setShowTypeManager] = useState(false)
+  const [typeDraft, setTypeDraft] = useState([])
+  const [isSavingTypes, setIsSavingTypes] = useState(false)
+
   const todayStr = beijingDateStr()
 
   useEffect(() => {
     loadSchedules()
+    loadShiftData()
   }, [])
 
   const loadSchedules = async () => {
@@ -114,6 +135,20 @@ function CalendarPanel({ onClose }) {
       setIsLoading(false)
     }
   }
+
+  const loadShiftData = async () => {
+    try {
+      const [types, map] = await Promise.all([getShiftTypes(), getShifts()])
+      setShiftTypes(Array.isArray(types) ? types : [])
+      setShifts(map && typeof map === 'object' ? map : {})
+    } catch (err) {
+      console.error('加载排班失败:', err)
+    }
+  }
+
+  // 班次类型 id -> 类型对象
+  const shiftTypeMap = {}
+  shiftTypes.forEach(t => { shiftTypeMap[t.id] = t })
 
   // 每天日程数量映射
   const dayCountMap = {}
@@ -219,6 +254,70 @@ function CalendarPanel({ onClose }) {
     await loadSchedules()
   }
 
+  // ===== 排班相关 =====
+  // 设置单日班次（在当日面板里）
+  const handleSetDayShift = async (dateStr, typeId) => {
+    const map = await setShift(dateStr, typeId)
+    if (map) setShifts(map)
+  }
+
+  // 进入/退出批量排班模式
+  const toggleBatchMode = () => {
+    setBatchMode(!batchMode)
+    setBatchDays([])
+    setBatchType(shiftTypes[0]?.id || '')
+    setSelectedDay(null)
+  }
+
+  // 批量模式下点击某天：加入/移出选中
+  const toggleBatchDay = (dateStr) => {
+    setBatchDays(prev => prev.includes(dateStr)
+      ? prev.filter(d => d !== dateStr)
+      : [...prev, dateStr])
+  }
+
+  // 应用批量排班
+  const applyBatchShift = async () => {
+    if (batchDays.length === 0) return
+    const map = await setShift(batchDays, batchType || null)
+    if (map) setShifts(map)
+    setBatchDays([])
+  }
+
+  // ===== 班次类型管理 =====
+  const openTypeManager = () => {
+    setTypeDraft(shiftTypes.map(t => ({ ...t })))
+    setShowTypeManager(true)
+  }
+
+  const addDraftType = () => {
+    const usedColors = typeDraft.map(t => t.color)
+    const color = SHIFT_COLORS.find(c => !usedColors.includes(c)) || SHIFT_COLORS[0]
+    setTypeDraft([...typeDraft, { id: `st-new-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name: '', color, start: '', end: '' }])
+  }
+
+  const updateDraftType = (idx, field, value) => {
+    setTypeDraft(typeDraft.map((t, i) => i === idx ? { ...t, [field]: value } : t))
+  }
+
+  const removeDraftType = (idx) => {
+    setTypeDraft(typeDraft.filter((_, i) => i !== idx))
+  }
+
+  const saveTypes = async () => {
+    setIsSavingTypes(true)
+    try {
+      const cleaned = typeDraft.filter(t => (t.name || '').trim())
+      const saved = await saveShiftTypes(cleaned)
+      if (Array.isArray(saved)) setShiftTypes(saved)
+      setShowTypeManager(false)
+    } catch (err) {
+      console.error('保存班次类型失败:', err)
+    } finally {
+      setIsSavingTypes(false)
+    }
+  }
+
   const grid = buildGrid()
   const totalCount = schedules.length
 
@@ -232,7 +331,12 @@ function CalendarPanel({ onClose }) {
           </button>
           <h1 className="panel-title">日历</h1>
           <div className="tool-header-actions">
-            <span className="panel-subtitle">共 {totalCount} 个日程</span>
+            <button className="cal-header-icon-btn" onClick={openTypeManager} title="班次类型管理">
+              <SettingsIcon />
+            </button>
+            <button className={`cal-header-icon-btn${batchMode ? ' active' : ''}`} onClick={toggleBatchMode} title="批量排班">
+              排班
+            </button>
             <button className="add-tool-btn" onClick={() => openNewEditor()}>
               <PlusIcon />
               新增
@@ -249,6 +353,18 @@ function CalendarPanel({ onClose }) {
             <button className="cal-today-btn" onClick={goToday}>今天</button>
           </div>
 
+          {/* 批量排班操作条 */}
+          {batchMode && (
+            <div className="cal-batch-bar">
+              <span className="cal-batch-hint">点选日期后应用班次（已选 {batchDays.length} 天）</span>
+              <select className="cal-batch-select" value={batchType} onChange={e => setBatchType(e.target.value)}>
+                <option value="">清除班次</option>
+                {shiftTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+              <button className="cal-batch-apply" onClick={applyBatchShift} disabled={batchDays.length === 0}>应用</button>
+            </div>
+          )}
+
           {/* 星期表头 */}
           <div className="cal-weekdays">
             {WEEKDAYS.map(w => <div key={w} className="cal-weekday">{w}</div>)}
@@ -263,13 +379,18 @@ function CalendarPanel({ onClose }) {
                 if (!cell) return <div key={`empty-${i}`} className="cal-cell empty"></div>
                 const count = dayCountMap[cell.dateStr] || 0
                 const isToday = cell.dateStr === todayStr
+                const shiftType = shiftTypeMap[shifts[cell.dateStr]]
+                const isBatchSelected = batchMode && batchDays.includes(cell.dateStr)
                 return (
                   <div
                     key={cell.dateStr}
-                    className={`cal-cell${isToday ? ' today' : ''}${count ? ' has-event' : ''}`}
-                    onClick={() => setSelectedDay(cell.dateStr)}
+                    className={`cal-cell${isToday ? ' today' : ''}${count ? ' has-event' : ''}${isBatchSelected ? ' batch-selected' : ''}`}
+                    onClick={() => batchMode ? toggleBatchDay(cell.dateStr) : setSelectedDay(cell.dateStr)}
                   >
                     <span className="cal-day-num">{cell.day}</span>
+                    {shiftType && (
+                      <span className="cal-shift-badge" style={{ background: shiftType.color }}>{shiftType.name.slice(0, 2)}</span>
+                    )}
                     {count > 0 && <span className="cal-dot">{count > 1 ? count : ''}</span>}
                   </div>
                 )
@@ -288,6 +409,24 @@ function CalendarPanel({ onClose }) {
               <button className="editor-close-btn" onClick={() => setSelectedDay(null)}>
                 <CloseIcon size={18} />
               </button>
+            </div>
+            {/* 当日班次选择 */}
+            <div className="cal-day-shifts">
+              <span className="cal-day-shifts-label">班次</span>
+              <div className="cal-shift-options">
+                <button
+                  className={`cal-shift-chip${!shifts[selectedDay] ? ' active' : ''}`}
+                  onClick={() => handleSetDayShift(selectedDay, null)}
+                >无</button>
+                {shiftTypes.map(t => (
+                  <button
+                    key={t.id}
+                    className={`cal-shift-chip${shifts[selectedDay] === t.id ? ' active' : ''}`}
+                    style={shifts[selectedDay] === t.id ? { background: t.color, borderColor: t.color, color: '#fff' } : { borderColor: t.color, color: t.color }}
+                    onClick={() => handleSetDayShift(selectedDay, t.id)}
+                  >{t.name}</button>
+                ))}
+              </div>
             </div>
             <div className="cal-day-body">
               {daySchedules.length === 0 ? (
@@ -384,6 +523,65 @@ function CalendarPanel({ onClose }) {
               <button className="editor-cancel-btn" onClick={closeEditor}>取消</button>
               <button className="editor-save-btn" onClick={handleSave} disabled={!formTitle.trim() || isSaving}>
                 {isSaving ? '保存中...' : (editing ? '保存修改' : '保存')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 班次类型管理弹窗 */}
+      {showTypeManager && (
+        <div className="cal-editor-overlay" onClick={() => setShowTypeManager(false)}>
+          <div className="cal-editor-modal" onClick={e => e.stopPropagation()}>
+            <div className="cal-editor-header">
+              <h3>班次类型管理</h3>
+              <button className="editor-close-btn" onClick={() => setShowTypeManager(false)}>
+                <CloseIcon size={18} />
+              </button>
+            </div>
+            <div className="cal-editor-body">
+              {typeDraft.length === 0 && <p className="cal-day-empty">还没有班次类型，点下方按钮添加</p>}
+              {typeDraft.map((t, idx) => (
+                <div key={t.id} className="cal-type-row">
+                  <input
+                    type="color"
+                    className="cal-type-color"
+                    value={t.color}
+                    onChange={e => updateDraftType(idx, 'color', e.target.value)}
+                  />
+                  <input
+                    type="text"
+                    className="cal-input cal-type-name"
+                    value={t.name}
+                    onChange={e => updateDraftType(idx, 'name', e.target.value)}
+                    placeholder="班次名"
+                    maxLength={10}
+                  />
+                  <input
+                    type="time"
+                    className="cal-input cal-type-time"
+                    value={t.start || ''}
+                    onChange={e => updateDraftType(idx, 'start', e.target.value)}
+                  />
+                  <span className="cal-type-sep">-</span>
+                  <input
+                    type="time"
+                    className="cal-input cal-type-time"
+                    value={t.end || ''}
+                    onChange={e => updateDraftType(idx, 'end', e.target.value)}
+                  />
+                  <button className="cal-icon-btn danger" onClick={() => removeDraftType(idx)}><TrashIcon /></button>
+                </div>
+              ))}
+              <button className="cal-type-add-btn" onClick={addDraftType}>
+                <PlusIcon /> 添加班次类型
+              </button>
+              <p className="cal-hint">起止时间可留空（如「休息」）。班次会一同告诉恋人 X，方便他体贴你的作息。</p>
+            </div>
+            <div className="cal-editor-footer">
+              <button className="editor-cancel-btn" onClick={() => setShowTypeManager(false)}>取消</button>
+              <button className="editor-save-btn" onClick={saveTypes} disabled={isSavingTypes}>
+                {isSavingTypes ? '保存中...' : '保存'}
               </button>
             </div>
           </div>

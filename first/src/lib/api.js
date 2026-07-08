@@ -335,7 +335,7 @@ export async function chatWithAI({ chatId, system, messages, model, temperature,
  */
 export async function chatWithAIStream(
   { chatId, system, messages, model, temperature, maxTokens, topP, deepThinking, tools },
-  { onDelta, onTool, onStatus } = {}
+  { onDelta, onReasoning, onTool, onStatus, signal } = {}
 ) {
   const url = getApiUrl('/api/chat/stream')
   let reply = ''
@@ -346,6 +346,7 @@ export async function chatWithAIStream(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chatId, system, messages, model, temperature, maxTokens, topP, deepThinking, tools }),
+      signal,
     })
 
     if (!resp.ok || !resp.body) {
@@ -379,6 +380,8 @@ export async function chatWithAIStream(
         if (evt.type === 'delta') {
           reply += evt.text
           onDelta?.(evt.text, reply)
+        } else if (evt.type === 'reasoning') {
+          onReasoning?.(evt.text)
         } else if (evt.type === 'tool') {
           toolResults = evt.toolResults || []
           onTool?.(toolResults)
@@ -395,6 +398,10 @@ export async function chatWithAIStream(
 
     return { reply, toolResults }
   } catch (err) {
+    // 用户主动终止（AbortError）：把已产出的内容作为正常结果返回，不当作错误
+    if (err.name === 'AbortError') {
+      return { reply, toolResults, aborted: true }
+    }
     // 已经产生的部分内容保留，附加错误提示
     return {
       reply: reply || `（AI 暂时无法回复：${err.message}）`,
@@ -620,6 +627,56 @@ export async function deleteSchedule(id) {
   } catch (err) {
     console.error('删除日程失败:', err)
     return false
+  }
+}
+
+// ===== 排班表 / 工作日标注 API =====
+
+export async function getShiftTypes() {
+  try {
+    const res = await request('/api/shift-types')
+    return res?.data || []
+  } catch (err) {
+    console.error('获取班次类型失败:', err)
+    return []
+  }
+}
+
+export async function saveShiftTypes(types) {
+  try {
+    const res = await request('/api/shift-types', {
+      method: 'PUT',
+      body: JSON.stringify({ types }),
+    })
+    return res?.data || []
+  } catch (err) {
+    console.error('保存班次类型失败:', err)
+    return null
+  }
+}
+
+export async function getShifts(month = null) {
+  try {
+    const query = month ? `?month=${encodeURIComponent(month)}` : ''
+    const res = await request(`/api/shift${query}`)
+    return res?.data || {}
+  } catch (err) {
+    console.error('获取排班失败:', err)
+    return {}
+  }
+}
+
+// date 可为字符串或数组；typeId 为空表示清除该天
+export async function setShift(date, typeId) {
+  try {
+    const res = await request('/api/shift', {
+      method: 'POST',
+      body: JSON.stringify({ date, typeId: typeId || null }),
+    })
+    return res?.data || {}
+  } catch (err) {
+    console.error('保存排班失败:', err)
+    return null
   }
 }
 

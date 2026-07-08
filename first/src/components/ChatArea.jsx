@@ -12,6 +12,8 @@ function ChatArea({
   onKeyPress, 
   isTyping,
   streamingText,
+  streamingReasoning,
+  onStopGenerating,
   selectedModel,
   models,
   onModelChange,
@@ -31,6 +33,8 @@ function ChatArea({
   const prevMessageCountRef = useRef(0)
   // 页面/标签页是否可见：用于判断 AI 消息是否被“看到”（已读）
   const [isPageVisible, setIsPageVisible] = useState(!document.hidden)
+  // 思考链折叠面板是否展开（默认展开，方便实时看到思考过程）
+  const [reasoningExpanded, setReasoningExpanded] = useState(true)
 
   useEffect(() => {
     const handleVisibility = () => setIsPageVisible(!document.hidden)
@@ -106,10 +110,10 @@ function ChatArea({
 
   // 流式文本增长时跟随滚动（仅当用户已在底部时），保证打字机内容始终可见
   useEffect(() => {
-    if (streamingText && checkIsAtBottom()) {
+    if ((streamingText || streamingReasoning) && checkIsAtBottom()) {
       scrollToBottom('auto')
     }
-  }, [streamingText])
+  }, [streamingText, streamingReasoning])
 
   // 滚动事件监听：区分用户主动滚动和自动滚动
   useEffect(() => {
@@ -165,13 +169,37 @@ function ChatArea({
             <Message key={message.id} message={message} status={getMessageStatus(message, index, chat.messages)} />
           ))
         )}
+        {/* 思考链折叠面板：深度思考模型生成期间实时展示，不写入历史 */}
+        {isTyping && streamingReasoning && (
+          <div className="reasoning-panel">
+            <button
+              className="reasoning-toggle"
+              onClick={() => setReasoningExpanded(v => !v)}
+            >
+              <span className="reasoning-toggle-icon">{reasoningExpanded ? '▾' : '▸'}</span>
+              <span>{streamingText ? '已深度思考' : '正在深度思考…'}</span>
+            </button>
+            {reasoningExpanded && (
+              <div className="reasoning-content">{streamingReasoning}</div>
+            )}
+          </div>
+        )}
         {/* 流式回复气泡：AI 正在生成、尚未写库时实时展示 */}
         {streamingText && (
           <div className="message assistant">
             <div className="message-content">{streamingText}</div>
           </div>
         )}
-        {isTyping && !streamingText && <TypingIndicator />}
+        {isTyping && !streamingText && !streamingReasoning && <TypingIndicator />}
+        {/* 生成中：终止按钮 */}
+        {isTyping && (
+          <div className="stop-generating-row">
+            <button className="stop-generating-btn" onClick={onStopGenerating}>
+              <span className="stop-icon"></span>
+              停止生成
+            </button>
+          </div>
+        )}
         <div ref={messagesEndRef} />
       </div>
       {/* 新消息提示浮动按钮 */}
