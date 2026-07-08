@@ -7,6 +7,7 @@ import ToolConfigPanel from './components/ToolConfigPanel'
 import MemoryPanel from './components/MemoryPanel'
 import DiaryPanel from './components/DiaryPanel'
 import AppCheckPanel from './components/AppCheckPanel'
+import CalendarPanel from './components/CalendarPanel'
 import ReadingPartner from './components/ReadingPartner'
 import Sidebar from './components/Sidebar'
 import ChatArea from './components/ChatArea'
@@ -59,6 +60,7 @@ function App() {
   const [memoryOpen, setMemoryOpen] = useState(false)
   const [diaryOpen, setDiaryOpen] = useState(false)
   const [appCheckOpen, setAppCheckOpen] = useState(false)
+  const [calendarOpen, setCalendarOpen] = useState(false)
   const [readingOpen, setReadingOpen] = useState(false) // 共读伴侣界面
   // 工具列表以后端返回为准（loadTools 会覆盖），
   // 初始置空避免首屏闪现后端未实现的工具
@@ -410,6 +412,7 @@ function App() {
           onOpenDiary={() => setDiaryOpen(true)}
           onOpenAppCheck={() => setAppCheckOpen(true)}
           onOpenReading={() => setReadingOpen(true)}
+          onOpenCalendar={() => setCalendarOpen(true)}
         />
       ) : (
         <>
@@ -501,6 +504,12 @@ function App() {
       {appCheckOpen && (
         <AppCheckPanel 
           onClose={() => setAppCheckOpen(false)}
+        />
+      )}
+
+      {calendarOpen && (
+        <CalendarPanel
+          onClose={() => setCalendarOpen(false)}
         />
       )}
 

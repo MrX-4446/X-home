@@ -68,6 +68,16 @@ const {
   setupProactiveTask,
 } = require('./lib/memory/proactive')
 
+// 日程 / 日历层（CRUD / 上下文注入 / 主动提醒定时任务）已抽离到 lib/memory/schedule.js
+const {
+  listSchedules,
+  createSchedule,
+  updateSchedule,
+  deleteSchedule,
+  buildScheduleContext,
+  setupReminderTask,
+} = require('./lib/memory/schedule')
+
 function generateMessageId(baseTime, index) {
   return `msg-${baseTime}-${index}-${Math.random().toString(36).slice(2, 8)}`
 }
@@ -132,6 +142,7 @@ const mockTools = readStorage('tools') || [
   { id: 'tool-4', name: '翻译', description: '多语言翻译', iconKey: '翻译', enabled: true, category: '工具', type: 'mobile_app' },
   { id: 'tool-9', name: '代码执行', description: '执行 Python 代码，支持数学计算、数据处理等', iconKey: '代码', enabled: true, category: '工具', type: 'tool' },
   { id: 'tool-11', name: '系统时间', description: '获取当前系统时间和日期', iconKey: '时间', enabled: true, category: '系统', type: 'tool' },
+  { id: 'tool-13', name: '日程查询', description: '查询轩记录的日程安排（今天/明天/本周等）', iconKey: '日历', enabled: true, category: '生活', type: 'tool' },
   { id: 'tool-12', name: '打开网页', description: '读取指定网址的正文内容（用于打开用户发来的链接）', iconKey: '搜索', enabled: true, category: '搜索', type: 'cloud' },
 ]
 
@@ -235,7 +246,8 @@ ${relevantMemories.map((m, i) => `${i + 1}. ${m.content}`).join('\n')}
 时间段：${timeOfDay}
 以上时间仅供你参考，除非与话题相关或轩主动提及，否则不必主动提起时间或作息。
 `
-  const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}\n\n${memoryContext}\n\n${timeContext}` : userSystemPrompt
+  const scheduleContext = buildScheduleContext()
+  const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}\n\n${memoryContext}\n\n${scheduleContext}\n\n${timeContext}` : userSystemPrompt
 
   // 创建消息副本，不修改原始消息（避免污染数据库）
   const messagesCopy = newMessages
@@ -714,7 +726,8 @@ ${relevantMemories.map((m, i) => `${i + 1}. ${m.content}`).join('\n')}
 时间段：${timeOfDay}
 以上时间仅供你参考，除非与话题相关或轩主动提及，否则不必主动提起时间或作息。
 `
-          const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}\n\n${memoryContext}\n\n${timeContext}` : userSystemPrompt
+          const scheduleContext = buildScheduleContext()
+          const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}\n\n${memoryContext}\n\n${scheduleContext}\n\n${timeContext}` : userSystemPrompt
 
           // 【关键修复】创建消息副本，不修改原始消息（避免污染数据库）
           const messagesCopy = newMessages
@@ -1253,6 +1266,36 @@ ${messagesText}
       return sendJson(res, 200, { ok: deleted })
     }
 
+    // ===== 日程 / 日历 =====
+    if (pathname === '/api/schedule' && req.method === 'GET') {
+      const month = url.searchParams.get('month') || null
+      return sendJson(res, 200, { data: listSchedules(month) })
+    }
+
+    if (pathname === '/api/schedule' && req.method === 'POST') {
+      const body = await readBody(req)
+      if (!body || !body.startAt) {
+        return sendJson(res, 400, { error: '缺少日程时间 startAt' })
+      }
+      const item = createSchedule(body)
+      return sendJson(res, 200, { data: item })
+    }
+
+    if (pathname.match(/\/api\/schedule\/.+/) && req.method === 'PUT') {
+      const id = pathname.split('/')[3]
+      const body = await readBody(req)
+      const updated = updateSchedule(id, body || {})
+      if (!updated) return sendJson(res, 404, { error: '日程不存在' })
+      return sendJson(res, 200, { data: updated })
+    }
+
+    if (pathname.match(/\/api\/schedule\/.+/) && req.method === 'DELETE') {
+      const id = pathname.split('/')[3]
+      const ok = deleteSchedule(id)
+      if (!ok) return sendJson(res, 404, { error: '日程不存在' })
+      return sendJson(res, 200, { ok: true })
+    }
+
     // ===== 数据备份：导出全部本地 JSON =====
     if (pathname === '/api/export' && req.method === 'GET') {
       const keys = listStorageKeys()
@@ -1329,9 +1372,11 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('  POST /api/memories/{id}/touch')
   console.log('  POST /api/diary/compile    (手动触发日记整理)')
   console.log('  GET  /api/diary/status     (查看日记状态)')
+  console.log('  GET/POST/PUT/DELETE /api/schedule  (日程/日历)')
   
   setupDailyDiaryTask()
   setupProactiveTask()
+  setupReminderTask()
   
   setTimeout(() => {
     checkAndBackfillMissingDiaries().catch(err => {

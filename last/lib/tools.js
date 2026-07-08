@@ -12,6 +12,7 @@ function normalizeToolName(name) {
     '翻译': 'translator',
     '代码执行': 'execute_code',
     '系统时间': 'system_time',
+    '日程查询': 'query_schedule',
   }
   if (readableNameMap[text]) return readableNameMap[text]
   return text
@@ -64,6 +65,15 @@ function buildToolDefinitions(enabledTools) {
       description: '获取当前系统时间、日期、星期等信息',
       parameters: {
         format: { type: 'string', description: '时间格式，可选：full(完整)、date(仅日期)、time(仅时间)' },
+      },
+      required: [],
+    },
+    '日程查询': {
+      description: '查询轩记录的日程安排。当用户问"我今天/明天/这周/下周有什么安排""几号有什么日程"等问题时使用。可按日期范围或关键词过滤。',
+      parameters: {
+        start: { type: 'string', description: '查询起始日期（YYYY-MM-DD），可选，缺省为今天' },
+        end: { type: 'string', description: '查询结束日期（YYYY-MM-DD），可选，缺省为起始日期后 7 天' },
+        keyword: { type: 'string', description: '按标题/备注关键词过滤，可选' },
       },
       required: [],
     },
@@ -148,6 +158,11 @@ async function executeToolCall(toolCall, enabledTools) {
         result += `时间：${beijingTime.getHours().toString().padStart(2, '0')}:${beijingTime.getMinutes().toString().padStart(2, '0')}:${beijingTime.getSeconds().toString().padStart(2, '0')}（北京时间）`
       }
       return { ok: true, name: toolName, input: format, output: result }
+    }
+
+    if (toolName === '日程查询') {
+      const output = querySchedules({ start: args.start, end: args.end, keyword: args.keyword || args.query })
+      return { ok: true, name: toolName, input: JSON.stringify(args), output }
     }
 
     if (toolName === '天气查询') {
@@ -570,12 +585,49 @@ async function executeTranslate(text, target) {
   }
 }
 
+// 查询日程：从存储读取 schedule，按日期范围 + 关键词过滤，输出可读文本
+function querySchedules({ start, end, keyword } = {}) {
+  const { readStorage } = require('./storage')
+  const all = Array.isArray(readStorage('schedule')) ? readStorage('schedule') : []
+  if (all.length === 0) return '当前没有任何日程记录。'
+
+  // 起始日期默认今天（北京时间），结束日期默认起始 +7 天
+  const beijingTodayStr = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().split('T')[0]
+  const startStr = /^\d{4}-\d{2}-\d{2}$/.test(start || '') ? start : beijingTodayStr
+  let endStr = /^\d{4}-\d{2}-\d{2}$/.test(end || '') ? end : ''
+  if (!endStr) {
+    const s = new Date(startStr + 'T00:00:00Z')
+    endStr = new Date(s.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  }
+
+  const kw = (keyword || '').trim()
+  const matched = all.filter(s => {
+    const dayStr = new Date(Date.parse(s.startAt) + 8 * 60 * 60 * 1000).toISOString().split('T')[0]
+    if (dayStr < startStr || dayStr > endStr) return false
+    if (kw && !(`${s.title || ''} ${s.note || ''}`).includes(kw)) return false
+    return true
+  }).sort((a, b) => Date.parse(a.startAt) - Date.parse(b.startAt))
+
+  if (matched.length === 0) {
+    return `${startStr} 到 ${endStr} 之间${kw ? `包含「${kw}」的` : ''}没有日程安排。`
+  }
+
+  const weekdays = ['日', '一', '二', '三', '四', '五', '六']
+  const lines = matched.map(s => {
+    const b = new Date(Date.parse(s.startAt) + 8 * 60 * 60 * 1000)
+    const dateStr = `${b.getUTCMonth() + 1}月${b.getUTCDate()}日 周${weekdays[b.getUTCDay()]}`
+    const hh = String(b.getUTCHours()).padStart(2, '0')
+    const mm = String(b.getUTCMinutes()).padStart(2, '0')
+    const status = s.done ? '（已完成）' : ''
+    return `${dateStr} ${hh}:${mm} ${s.title}${s.note ? '（' + s.note + '）' : ''}${status}`
+  })
+  return `查询到 ${matched.length} 条日程：\n${lines.join('\n')}`
+}
+
 async function executeCode(code) {
   const { spawn } = require('child_process')
-
   return new Promise((resolve) => {
     const pythonProcess = spawn('python', ['-c', code])
-
     let output = ''
     let errorOutput = ''
 
@@ -615,4 +667,5 @@ module.exports = {
   executeWeather,
   executeTranslate,
   executeCode,
+  querySchedules,
 }

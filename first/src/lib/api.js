@@ -574,8 +574,56 @@ export async function bulkUploadNotes(notes) {
   }
 }
 
-// ===== 数据导入/导出 API =====
+// ===== 日程 / 日历 API =====
 
+export async function getSchedules(month = null) {
+  try {
+    const query = month ? `?month=${encodeURIComponent(month)}` : ''
+    const res = await request(`/api/schedule${query}`)
+    return res?.data || []
+  } catch (err) {
+    console.error('获取日程失败:', err)
+    return []
+  }
+}
+
+export async function addSchedule(schedule) {
+  try {
+    const res = await request('/api/schedule', {
+      method: 'POST',
+      body: JSON.stringify(schedule),
+    })
+    return res?.data || null
+  } catch (err) {
+    console.error('新增日程失败:', err)
+    return null
+  }
+}
+
+export async function updateSchedule(id, updates) {
+  try {
+    const res = await request(`/api/schedule/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    })
+    return res?.data || null
+  } catch (err) {
+    console.error('更新日程失败:', err)
+    return null
+  }
+}
+
+export async function deleteSchedule(id) {
+  try {
+    await request(`/api/schedule/${id}`, { method: 'DELETE' })
+    return true
+  } catch (err) {
+    console.error('删除日程失败:', err)
+    return false
+  }
+}
+
+// ===== 数据导入/导出 API =====
 export async function exportData() {
   try {
     // 返回完整备份对象（含 version/exportedAt/data），用于下载与恢复
