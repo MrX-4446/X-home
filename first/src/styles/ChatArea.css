@@ -127,20 +127,84 @@
 }
 
 .message {
-  max-width: 70%;
+  max-width: 82%;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
   animation: messageFadeIn 0.3s ease-out;
   animation-fill-mode: both;
 }
 
 .message.user {
   align-self: flex-end;
+  flex-direction: row-reverse;
 }
 
 .message.assistant {
   align-self: flex-start;
+}
+
+/* 消息内容列：气泡 + 心语 + 工具 + 时间 */
+.message-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.message.user .message-body {
+  align-items: flex-end;
+}
+
+/* 消息头像 */
+.message-avatar {
+  position: relative;
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 600;
+  color: white;
+  background-color: var(--primary-warm-gray-blue-dark);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  user-select: none;
+}
+
+/* 心语角标：叠在头像右下角 */
+.message-avatar-heart {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  font-size: 13px;
+  line-height: 1;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.2));
+}
+
+/* 心语（内心独白）：气泡下方浅色小字 */
+.message-heart {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 2px 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.message-heart .heart-icon {
+  font-style: normal;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.message-heart .heart-text {
+  min-width: 0;
 }
 
 @keyframes messageFadeIn {
@@ -174,6 +238,13 @@
   background-color: var(--background-card);
   color: var(--text-primary);
   border-bottom-left-radius: var(--radius-sm);
+}
+
+/* 用户头像用浅色区分于 X 的头像 */
+.message.user .message-avatar {
+  background-color: var(--background-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.08));
 }
 
 .message-time {

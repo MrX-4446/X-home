@@ -104,6 +104,19 @@ function generateMessageId(baseTime, index) {
   return `msg-${baseTime}-${index}-${Math.random().toString(36).slice(2, 8)}`
 }
 
+// 内心独白（心语）标记：AI 在回复末尾埋 [HEART:内心独白]。
+// 从正文中提取独白内容、并把标记从正文里剥离，避免 [HEART:...] 混进
+// 消息历史/记忆压缩（污染后续 prompt），返回 { reply: 干净正文, heart: 独白或 null }。
+const HEART_MARKER_REGEX = /\[HEART:([\s\S]*?)\]/
+function extractAndStripHeart(rawReply) {
+  if (!rawReply) return { reply: rawReply || '', heart: null }
+  const match = rawReply.match(HEART_MARKER_REGEX)
+  if (!match) return { reply: rawReply, heart: null }
+  const heart = (match[1] || '').trim()
+  const reply = rawReply.replace(HEART_MARKER_REGEX, '').replace(/\n{3,}/g, '\n\n').trim()
+  return { reply, heart: heart || null }
+}
+
 function normalizeChatMessages(chat) {
   if (!chat || !Array.isArray(chat.messages)) return false
 
@@ -644,7 +657,9 @@ ${messagesText}
           finalReply = secondResult.reply
         }
 
-        sse({ type: 'done', reply: finalReply, toolResults })
+        // 提取并剥离心语：正文下发/存储用干净文本，独白单独随 done 事件带给前端
+        const { reply: cleanReply, heart } = extractAndStripHeart(finalReply)
+        sse({ type: 'done', reply: cleanReply, toolResults, heart })
         res.end()
 
         // 回复结束后异步触发记忆压缩（不影响已结束的响应）
@@ -898,7 +913,9 @@ ${messagesText}
             }
           }
           
-          return sendJson(res, 200, { reply: finalReply, toolResults: toolResults })
+          // 提取并剥离心语：返回干净正文 + 单独的 heart 字段
+          const { reply: cleanReply, heart } = extractAndStripHeart(finalReply)
+          return sendJson(res, 200, { reply: cleanReply, toolResults: toolResults, heart })
       } catch (error) {
         console.error('对话处理错误:', error)
         return sendJson(res, 500, { error: error.message })

@@ -166,7 +166,13 @@ function ChatArea({
           </div>
         ) : (
           chat.messages.map((message, index) => (
-            <Message key={message.id} message={message} status={getMessageStatus(message, index, chat.messages)} />
+            <Message
+              key={message.id}
+              message={message}
+              status={getMessageStatus(message, index, chat.messages)}
+              chatAvatar={chat?.chatAvatar || '智'}
+              userAvatar={settings.user_avatar || '轩'}
+            />
           ))
         )}
         {/* 思考链折叠面板：深度思考模型生成期间实时展示，不写入历史 */}
@@ -187,7 +193,11 @@ function ChatArea({
         {/* 流式回复气泡：AI 正在生成、尚未写库时实时展示 */}
         {streamingText && (
           <div className="message assistant">
-            <div className="message-content">{streamingText}</div>
+            <div className="message-avatar">{chat?.chatAvatar || '智'}</div>
+            <div className="message-body">
+              {/* 流式期间隐藏未闭合的 [HEART: 片段，避免半截标记闪烁；done 后由 Message 正式渲染 */}
+              <div className="message-content">{streamingText.replace(/\[HEART:[\s\S]*$/, '').trimEnd()}</div>
+            </div>
           </div>
         )}
         {isTyping && !streamingText && !streamingReasoning && <TypingIndicator />}
