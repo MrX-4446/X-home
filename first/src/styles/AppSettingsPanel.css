@@ -1,0 +1,208 @@
+/* ===== 应用设置面板 ===== */
+
+/* App Settings Panel Styles */
+.app-settings-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease;
+}
+
+.app-settings-panel {
+  background-color: var(--background-card);
+  border-radius: var(--radius-lg);
+  width: 90%;
+  max-width: 480px;
+  max-height: 85vh;
+  overflow: hidden;
+  box-shadow: var(--shadow-medium);
+  animation: slideUp 0.3s ease;
+}
+
+.app-settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.app-settings-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.app-settings-close-btn {
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+}
+
+.app-settings-close-btn:hover {
+  background-color: rgba(138, 133, 128, 0.1);
+  color: var(--text-secondary);
+}
+
+.app-settings-content {
+  padding: 24px;
+  overflow-y: auto;
+  max-height: calc(85vh - 140px);
+}
+
+.app-settings-section {
+  margin-bottom: 28px;
+}
+
+.app-settings-section:last-child {
+  margin-bottom: 0;
+}
+
+.app-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--primary-warm-gray-blue);
+  text-transform: uppercase;
+  margin: 0 0 16px 0;
+}
+
+.app-setting-item {
+  margin-bottom: 16px;
+}
+
+.app-setting-item:last-child {
+  margin-bottom: 0;
+}
+
+.app-setting-item.toggle-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.app-setting-label {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.app-setting-item.toggle-item .app-setting-label {
+  margin-bottom: 0;
+}
+
+.app-setting-value {
+  font-size: 14px;
+  color: var(--primary-warm-gray-blue);
+  font-weight: 500;
+}
+
+.app-setting-value.readonly {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.app-setting-select {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background-color: rgba(255, 255, 255, 0.6);
+  color: var(--text-primary);
+  font-size: 14px;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.app-setting-select:focus {
+  border-color: var(--primary-warm-gray-blue);
+  box-shadow: 0 0 0 3px rgba(122, 138, 153, 0.1);
+}
+
+/* Toggle Button */
+.toggle-btn {
+  width: 48px;
+  height: 26px;
+  background-color: rgba(138, 133, 128, 0.2);
+  border: none;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  position: relative;
+  transition: background-color 0.2s ease;
+}
+
+.toggle-btn.active,
+.toggle-btn.on {
+  background-color: var(--primary-warm-gray-blue);
+}
+
+.toggle-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  background-color: white;
+  border-radius: 50%;
+  transition: transform 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.toggle-btn.active .toggle-thumb,
+.toggle-btn.on .toggle-thumb {
+  transform: translateX(22px);
+}
+
+/* Footer */
+.app-settings-footer {
+  display: flex;
+  gap: 16px;
+  padding: 16px 32px;
+  border-top: 1px solid var(--border-color);
+  background-color: rgba(255, 255, 255, 0.3);
+}
+
+.app-btn {
+  flex: 1;
+  padding: 12px 16px;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.app-btn-primary {
+  background-color: var(--primary-warm-gray-blue);
+  color: white;
+}
+
+.app-btn-primary:hover {
+  background-color: var(--primary-warm-gray-blue-dark);
+}
+
+.app-btn-secondary {
+  background-color: rgba(138, 133, 128, 0.1);
+  color: var(--text-secondary);
+}
+
+.app-btn-secondary:hover {
+  background-color: rgba(138, 133, 128, 0.2);
+}

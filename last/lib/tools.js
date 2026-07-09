@@ -13,6 +13,7 @@ function normalizeToolName(name) {
     '代码执行': 'execute_code',
     '系统时间': 'system_time',
     '日程查询': 'query_schedule',
+    '排班查询': 'query_shifts',
   }
   if (readableNameMap[text]) return readableNameMap[text]
   return text
@@ -74,6 +75,14 @@ function buildToolDefinitions(enabledTools) {
         start: { type: 'string', description: '查询起始日期（YYYY-MM-DD），可选，缺省为今天' },
         end: { type: 'string', description: '查询结束日期（YYYY-MM-DD），可选，缺省为起始日期后 7 天' },
         keyword: { type: 'string', description: '按标题/备注关键词过滤，可选' },
+      },
+      required: [],
+    },
+    '排班查询': {
+      description: '查询轩的排班表（上班班次，如早班/夜班/休息/调休）。当用户问"我这周几个夜班""几号上早班""下周哪天休息""我明天上什么班"等问题时使用。可按日期范围过滤。',
+      parameters: {
+        start: { type: 'string', description: '查询起始日期（YYYY-MM-DD），可选，缺省为今天' },
+        end: { type: 'string', description: '查询结束日期（YYYY-MM-DD），可选，缺省为起始日期后 7 天' },
       },
       required: [],
     },
@@ -162,6 +171,11 @@ async function executeToolCall(toolCall, enabledTools) {
 
     if (toolName === '日程查询') {
       const output = querySchedules({ start: args.start, end: args.end, keyword: args.keyword || args.query })
+      return { ok: true, name: toolName, input: JSON.stringify(args), output }
+    }
+
+    if (toolName === '排班查询') {
+      const output = queryShifts({ start: args.start, end: args.end })
       return { ok: true, name: toolName, input: JSON.stringify(args), output }
     }
 
@@ -624,6 +638,51 @@ function querySchedules({ start, end, keyword } = {}) {
   return `查询到 ${matched.length} 条日程：\n${lines.join('\n')}`
 }
 
+// 查询排班：从存储读取 shifts + shift_types，按日期范围输出可读文本
+function queryShifts({ start, end } = {}) {
+  const { readStorage } = require('./storage')
+  const map = readStorage('shifts')
+  const shifts = map && typeof map === 'object' && !Array.isArray(map) ? map : {}
+  if (Object.keys(shifts).length === 0) return '当前没有任何排班记录。'
+
+  const typesRaw = readStorage('shift_types')
+  const types = Array.isArray(typesRaw) && typesRaw.length > 0 ? typesRaw : [
+    { id: 'st-morning', name: '早班', start: '08:00', end: '16:00' },
+    { id: 'st-night', name: '夜班', start: '20:00', end: '08:00' },
+    { id: 'st-rest', name: '休息', start: '', end: '' },
+    { id: 'st-swap', name: '调休', start: '', end: '' },
+  ]
+  const typeById = (id) => types.find(t => t.id === id) || null
+
+  // 起始日期默认今天（北京时间），结束日期默认起始 +7 天
+  const beijingTodayStr = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().split('T')[0]
+  const startStr = /^\d{4}-\d{2}-\d{2}$/.test(start || '') ? start : beijingTodayStr
+  let endStr = /^\d{4}-\d{2}-\d{2}$/.test(end || '') ? end : ''
+  if (!endStr) {
+    const s = new Date(startStr + 'T00:00:00Z')
+    endStr = new Date(s.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  }
+
+  const weekdays = ['日', '一', '二', '三', '四', '五', '六']
+  const matched = Object.keys(shifts)
+    .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d) && d >= startStr && d <= endStr)
+    .sort()
+
+  if (matched.length === 0) {
+    return `${startStr} 到 ${endStr} 之间没有排班记录。`
+  }
+
+  const lines = matched.map(d => {
+    const t = typeById(shifts[d])
+    const name = t ? t.name : '未知班次'
+    const timeRange = t && t.start && t.end ? `（${t.start}-${t.end}）` : ''
+    const wk = weekdays[new Date(d + 'T00:00:00Z').getUTCDay()]
+    const [y, m, day] = d.split('-')
+    return `${Number(m)}月${Number(day)}日 周${wk} ${name}${timeRange}`
+  })
+  return `查询到 ${matched.length} 天排班：\n${lines.join('\n')}`
+}
+
 async function executeCode(code) {
   const { spawn } = require('child_process')
   return new Promise((resolve) => {
@@ -668,4 +727,5 @@ module.exports = {
   executeTranslate,
   executeCode,
   querySchedules,
+  queryShifts,
 }

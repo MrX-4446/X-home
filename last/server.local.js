@@ -87,6 +87,19 @@ const {
   buildShiftContext,
 } = require('./lib/memory/shifts')
 
+// 纪念日 / 提醒（CRUD / 上下文注入 / 主动庆祝定时任务）已抽离到 lib/memory/anniversaries.js
+const {
+  listAnniversaries,
+  createAnniversary,
+  updateAnniversary,
+  deleteAnniversary,
+  buildAnniversaryContext,
+  setupAnniversaryTask,
+} = require('./lib/memory/anniversaries')
+
+// 极光推送（设备 token 注册 + REST 单推）
+const { registerToken: registerPushToken, isConfigured: isPushConfigured } = require('./lib/push')
+
 function generateMessageId(baseTime, index) {
   return `msg-${baseTime}-${index}-${Math.random().toString(36).slice(2, 8)}`
 }
@@ -152,6 +165,7 @@ const mockTools = readStorage('tools') || [
   { id: 'tool-9', name: '代码执行', description: '执行 Python 代码，支持数学计算、数据处理等', iconKey: '代码', enabled: true, category: '工具', type: 'tool' },
   { id: 'tool-11', name: '系统时间', description: '获取当前系统时间和日期', iconKey: '时间', enabled: true, category: '系统', type: 'tool' },
   { id: 'tool-13', name: '日程查询', description: '查询轩记录的日程安排（今天/明天/本周等）', iconKey: '日历', enabled: true, category: '生活', type: 'tool' },
+  { id: 'tool-14', name: '排班查询', description: '查询轩的排班表（早班/夜班/休息/调休等）', iconKey: '日历', enabled: true, category: '生活', type: 'tool' },
   { id: 'tool-12', name: '打开网页', description: '读取指定网址的正文内容（用于打开用户发来的链接）', iconKey: '搜索', enabled: true, category: '搜索', type: 'cloud' },
 ]
 
@@ -257,7 +271,8 @@ ${relevantMemories.map((m, i) => `${i + 1}. ${m.summary || m.content}`).join('\n
 `
   const scheduleContext = buildScheduleContext()
   const shiftContext = buildShiftContext()
-  const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}\n\n${memoryContext}\n\n${scheduleContext}\n\n${shiftContext}\n\n${timeContext}` : userSystemPrompt
+  const anniversaryContext = buildAnniversaryContext()
+  const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}\n\n${memoryContext}\n\n${scheduleContext}\n\n${shiftContext}\n\n${anniversaryContext}\n\n${timeContext}` : userSystemPrompt
 
   // 创建消息副本，不修改原始消息（避免污染数据库）
   const messagesCopy = newMessages
@@ -739,7 +754,8 @@ ${relevantMemories.map((m, i) => `${i + 1}. ${m.summary || m.content}`).join('\n
 `
           const scheduleContext = buildScheduleContext()
           const shiftContext = buildShiftContext()
-          const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}\n\n${memoryContext}\n\n${scheduleContext}\n\n${shiftContext}\n\n${timeContext}` : userSystemPrompt
+          const anniversaryContext = buildAnniversaryContext()
+          const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}\n\n${memoryContext}\n\n${scheduleContext}\n\n${shiftContext}\n\n${anniversaryContext}\n\n${timeContext}` : userSystemPrompt
 
           // 【关键修复】创建消息副本，不修改原始消息（避免污染数据库）
           const messagesCopy = newMessages
@@ -1308,6 +1324,46 @@ ${messagesText}
       return sendJson(res, 200, { ok: true })
     }
 
+    // ===== 纪念日 / 提醒 =====
+    if (pathname === '/api/anniversary' && req.method === 'GET') {
+      return sendJson(res, 200, { data: listAnniversaries() })
+    }
+
+    if (pathname === '/api/anniversary' && req.method === 'POST') {
+      const body = await readBody(req)
+      if (!body || !body.title || body.month == null || body.day == null) {
+        return sendJson(res, 400, { error: '缺少纪念日字段 title/month/day' })
+      }
+      const item = createAnniversary(body)
+      return sendJson(res, 200, { data: item })
+    }
+
+    if (pathname.match(/\/api\/anniversary\/.+/) && req.method === 'PUT') {
+      const id = pathname.split('/')[3]
+      const body = await readBody(req)
+      const updated = updateAnniversary(id, body || {})
+      if (!updated) return sendJson(res, 404, { error: '纪念日不存在' })
+      return sendJson(res, 200, { data: updated })
+    }
+
+    if (pathname.match(/\/api\/anniversary\/.+/) && req.method === 'DELETE') {
+      const id = pathname.split('/')[3]
+      const ok = deleteAnniversary(id)
+      if (!ok) return sendJson(res, 404, { error: '纪念日不存在' })
+      return sendJson(res, 200, { ok: true })
+    }
+
+    // ===== 极光推送：设备 token 注册 =====
+    if (pathname === '/api/push-token' && req.method === 'POST') {
+      const body = await readBody(req)
+      const regId = body && (body.registrationId || body.registration_id)
+      if (!regId) {
+        return sendJson(res, 400, { error: '缺少 registrationId' })
+      }
+      const ok = registerPushToken(regId, body.platform || 'android')
+      return sendJson(res, 200, { ok, configured: isPushConfigured() })
+    }
+
     // ===== 排班表 / 工作日标注 =====
     // 班次类型
     if (pathname === '/api/shift-types' && req.method === 'GET') {
@@ -1416,11 +1472,13 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('  POST /api/diary/compile    (手动触发日记整理)')
   console.log('  GET  /api/diary/status     (查看日记状态)')
   console.log('  GET/POST/PUT/DELETE /api/schedule  (日程/日历)')
+  console.log('  GET/POST/PUT/DELETE /api/anniversary  (纪念日/提醒)')
   console.log('  GET/POST /api/shift, GET/PUT /api/shift-types  (排班表)')
   
   setupDailyDiaryTask()
   setupProactiveTask()
   setupReminderTask()
+  setupAnniversaryTask()
   
   setTimeout(() => {
     checkAndBackfillMissingDiaries().catch(err => {

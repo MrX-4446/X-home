@@ -2,6 +2,6 @@
 <resources>
     <string name="app_name">X的家</string>
     <string name="title_activity_main">X的家</string>
-    <string name="package_name">com.x.readingpartner</string>
-    <string name="custom_url_scheme">com.x.readingpartner</string>
+    <string name="package_name">com.x.home</string>
+    <string name="custom_url_scheme">com.x.home</string>
 </resources>

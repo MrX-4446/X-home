@@ -1,0 +1,404 @@
+/* ===== 工具配置面板 ===== */
+
+/* Tool Config Panel */
+.tool-config-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease;
+}
+
+.tool-config-panel {
+  background-color: var(--background-card);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  width: 90%;
+  max-width: 600px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tool-config-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.tool-config-title-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tool-config-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.tool-config-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.tool-config-close-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background-color: rgba(0, 0, 0, 0.05);
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.tool-config-close-btn:hover {
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+.tool-config-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+
+/* Categories */
+.tool-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.category-btn {
+  padding: 6px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  background-color: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.category-btn:hover {
+  border-color: var(--primary-warm-gray-blue);
+  color: var(--primary-warm-gray-blue);
+}
+
+.category-btn.active {
+  background-color: var(--primary-warm-gray-blue);
+  border-color: var(--primary-warm-gray-blue);
+  color: white;
+}
+
+.tool-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.add-tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: var(--radius-md);
+  background-color: var(--primary-warm-gray-blue);
+  color: white;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.add-tool-btn:hover {
+  background-color: var(--primary-warm-gray-blue-dark);
+}
+
+.add-tool-panel {
+  margin-bottom: 16px;
+  padding: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background-color: var(--background-card);
+  box-shadow: var(--shadow-soft);
+}
+
+.add-tool-panel-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.add-tool-panel-header h3 {
+  margin: 0 0 6px;
+  color: var(--text-primary);
+  font-size: 16px;
+}
+
+.add-tool-panel-header p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.add-tool-close {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background-color: transparent;
+  color: var(--text-secondary);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.add-tool-close:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+  color: var(--text-primary);
+}
+
+.add-tool-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-row label {
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.form-row:has(.form-textarea),
+.mobile-app-tip,
+.add-tool-actions {
+  grid-column: 1 / -1;
+}
+
+.form-input,
+.form-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background-color: rgba(255, 255, 255, 0.5);
+  color: var(--text-primary);
+  font-size: 14px;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.form-input:focus,
+.form-textarea:focus {
+  border-color: var(--primary-warm-gray-blue);
+  box-shadow: 0 0 0 3px rgba(122, 138, 153, 0.1);
+}
+
+.form-textarea {
+  resize: vertical;
+  min-height: 78px;
+}
+
+.mobile-app-tip {
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background-color: rgba(122, 138, 153, 0.08);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.add-tool-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Tools List */
+.tools-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tool-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  background-color: rgba(255, 255, 255, 0.4);
+  border: 1px solid var(--border-color);
+  transition: all 0.2s ease;
+}
+
+.tool-item:hover {
+  background-color: rgba(255, 255, 255, 0.6);
+}
+
+.tool-item.disabled {
+  opacity: 0.6;
+}
+
+.tool-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  background-color: rgba(122, 138, 153, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+}
+
+.tool-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tool-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.tool-description {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.tool-category {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background-color: rgba(122, 138, 153, 0.1);
+  color: var(--text-secondary);
+  font-size: 11px;
+  width: fit-content;
+}
+
+/* Toggle Switch */
+.tool-toggle {
+  width: 44px;
+  height: 24px;
+  border-radius: 12px;
+  background-color: #d1d5db;
+  border: none;
+  cursor: pointer;
+  position: relative;
+  transition: background-color 0.2s ease;
+}
+
+.tool-toggle.on {
+  background-color: var(--primary-warm-gray-blue);
+}
+
+.toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background-color: white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: transform 0.2s ease;
+}
+
+.tool-toggle.on .toggle-thumb {
+  transform: translateX(20px);
+}
+
+.tool-config-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border-color);
+}
+
+/* Model Selector */
+.model-selector {
+  margin-top: 12px;
+  padding-left: 8px;
+}
+
+/* ---------- 响应式 ---------- */
+
+@media (max-width: 768px) {
+  /* 设置面板 - 移动端 */
+  .tool-config-panel {
+    width: 95%;
+    max-width: none;
+    margin: 10px;
+    border-radius: 16px;
+  }
+  .tool-config-header {
+    padding: 14px 16px;
+  }
+  .tool-config-title {
+    font-size: 16px;
+  }
+  .tool-config-content {
+    padding: 12px 16px;
+  }
+  /* 工具分类按钮 - 移动端 */
+  .tool-categories {
+    gap: 6px;
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+  }
+  .category-btn {
+    padding: 5px 12px;
+    font-size: 12px;
+  }
+  /* 表单 - 移动端 */
+  .add-tool-form {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .form-row label {
+    font-size: 12px;
+  }
+  .form-input,
+  .form-textarea {
+    padding: 8px 10px;
+    font-size: 13px;
+  }
+}

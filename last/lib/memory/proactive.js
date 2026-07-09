@@ -9,6 +9,7 @@ const path = require('path')
 const { readStorage, writeStorage, getSetting } = require('../storage')
 const { callAIProvider } = require('../ai-provider')
 const { surfaceMemoriesEnhanced } = require('./surface')
+const { sendPush } = require('../push')
 
 // ========== 可调参数 ==========
 const CHECK_INTERVAL_MS = 60 * 60 * 1000 // 每 1 小时扫描一次
@@ -121,6 +122,9 @@ async function generateProactiveMessage(chat) {
   target.messages.push(newMsg)
   target.updated_at = new Date().toISOString()
   writeStorage('chats', chats)
+
+  // 推送到设备通知栏（App 关闭也能收到；未配置极光则自动跳过）
+  sendPush('恋人 X', content, { chatId, type: 'proactive' }).catch(() => {})
 
   console.log(`[主动消息] 会话 ${chatId} 已主动发送: ${content.substring(0, 40)}...`)
   return true

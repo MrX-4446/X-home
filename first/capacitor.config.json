@@ -1,10 +1,17 @@
 {
-  "appId": "com.x.readingpartner",
+  "appId": "com.x.home",
   "appName": "X的家",
   "webDir": "dist",
   "server": {
     "url": "http://38.92.8.134",
     "cleartext": true,
     "androidScheme": "http"
+  },
+  "plugins": {
+    "JPush": {
+      "appKey": "21625263981ae8d19e2f30aa",
+      "channel": "default",
+      "production": false
+    }
   }
 }

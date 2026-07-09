@@ -1,0 +1,271 @@
+/* ===== 首页 ===== */
+
+/* Home Page Styles */
+.home-page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
+  background: linear-gradient(180deg, #EDEBE9 0%, #F5F3EF 100%);
+  display: flex;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+  width: 100%;
+  overflow-x: hidden;
+}
+
+.home-content {
+  max-width: none;
+  width: 100%;
+  height: 100%;
+  padding: 40px 24px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header Section */
+.home-header {
+  margin-bottom: 40px;
+}
+
+.header-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  color: var(--primary-warm-gray-blue);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.header-title {
+  font-size: 36px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 8px 0;
+}
+
+.header-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* Continue Chat Card */
+.continue-chat-card {
+  background-color: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(10px);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  margin-bottom: 32px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  border: 1px solid rgba(138, 133, 128, 0.1);
+}
+
+.continue-chat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-medium);
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.card-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--primary-warm-gray-blue);
+  text-transform: uppercase;
+}
+
+.card-time {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.card-title {
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin: 0 0 8px 0;
+}
+
+.card-preview {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 0 0 16px 0;
+  line-height: 1.5;
+}
+
+.open-btn {
+  padding: 8px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: white;
+  background-color: var(--primary-warm-gray-green-dark);
+  border: none;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.open-btn:hover {
+  background-color: var(--primary-warm-gray-green);
+}
+
+/* Modules Section */
+.modules-section {
+  margin-bottom: 32px;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin: 0;
+}
+
+.section-tag {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.modules-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.module-card {
+  background-color: rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(10px);
+  border-radius: var(--radius-md);
+  padding: 16px 12px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  border: 1px solid rgba(138, 133, 128, 0.15);
+}
+
+.module-card:hover {
+  background-color: rgba(122, 138, 153, 0.08);
+  border-color: rgba(122, 138, 153, 0.2);
+}
+
+.module-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+/* Utilities Section */
+.utilities-section {
+  margin-bottom: 32px;
+}
+
+.utilities-bar {
+  display: flex;
+  align-items: center;
+  background-color: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(10px);
+  border-radius: var(--radius-full);
+  padding: 4px;
+  border: 1px solid rgba(138, 133, 128, 0.1);
+}
+
+.utility-btn {
+  flex: 1;
+  padding: 12px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background-color: transparent;
+  border: none;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.utility-btn:hover {
+  color: var(--text-primary);
+}
+
+.divider {
+  width: 1px;
+  height: 24px;
+  background-color: var(--border-color);
+}
+
+/* Home Page Responsive */
+@media (max-width: 768px) {
+  .home-content {
+    max-width: 100%;
+    padding: 24px 16px;
+  }
+  
+  .home-header {
+    margin-bottom: 32px;
+  }
+  
+  .header-title {
+    font-size: 28px;
+    line-height: 1.2;
+  }
+  
+  .modules-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  
+  .module-card {
+    padding: 12px 8px;
+  }
+  
+  .module-name {
+    font-size: 12px;
+  }
+  
+  .continue-chat-card {
+    padding: 16px;
+  }
+  
+  .card-title {
+    font-size: 16px;
+  }
+  
+  .card-preview {
+    font-size: 13px;
+  }
+  
+  .utilities-bar {
+    padding: 2px;
+  }
+  
+  .utility-btn {
+    padding: 10px 12px;
+    font-size: 12px;
+  }
+}
+
+/* ---------- 响应式（补充） ---------- */
+
+@media (max-width: 480px) {
+  /* 首页模块网格：窄屏降为 2 列，避免 3 列文字挤压 */
+  .modules-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

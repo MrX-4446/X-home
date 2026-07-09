@@ -680,6 +680,54 @@ export async function setShift(date, typeId) {
   }
 }
 
+// ===== 纪念日 / 提醒 API =====
+
+export async function getAnniversaries() {
+  try {
+    const res = await request('/api/anniversary')
+    return res?.data || []
+  } catch (err) {
+    console.error('获取纪念日失败:', err)
+    return []
+  }
+}
+
+export async function addAnniversary(anni) {
+  try {
+    const res = await request('/api/anniversary', {
+      method: 'POST',
+      body: JSON.stringify(anni),
+    })
+    return res?.data || null
+  } catch (err) {
+    console.error('新增纪念日失败:', err)
+    return null
+  }
+}
+
+export async function updateAnniversary(id, updates) {
+  try {
+    const res = await request(`/api/anniversary/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    })
+    return res?.data || null
+  } catch (err) {
+    console.error('更新纪念日失败:', err)
+    return null
+  }
+}
+
+export async function deleteAnniversary(id) {
+  try {
+    await request(`/api/anniversary/${id}`, { method: 'DELETE' })
+    return true
+  } catch (err) {
+    console.error('删除纪念日失败:', err)
+    return false
+  }
+}
+
 // ===== 数据导入/导出 API =====
 export async function exportData() {
   try {

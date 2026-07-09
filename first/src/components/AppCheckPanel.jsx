@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { Capacitor } from '@capacitor/core'
 import errorMonitor from '../lib/errorMonitor'
 import { getApiUrl, exportData, importData } from '../lib/api'
 
@@ -109,7 +110,7 @@ function AppCheckPanel({ onClose }) {
     setIsLoadingChecks(false)
   }
 
-  // 导出备份：下载为本地 JSON 文件
+  // 导出备份：手机 App 写入文档目录并调起分享；电脑浏览器直接下载
   async function handleExport() {
     setIsBackuping(true)
     setBackupMsg('正在导出...')
@@ -119,17 +120,46 @@ function AppCheckPanel({ onClose }) {
         setBackupMsg('导出失败：无法获取数据')
         return
       }
-      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
+      const json = JSON.stringify(backup, null, 2)
       const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
-      a.href = url
-      a.download = `备份-${stamp}.json`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-      setBackupMsg('导出成功，已下载备份文件')
+      const filename = `备份-${stamp}.json`
+
+      if (Capacitor.isNativePlatform()) {
+        // 手机 App：Blob/<a download> 在 WebView 里不会真正落地文件，
+        // 改用 Filesystem 写入应用文档目录，再调起系统分享让用户另存
+        const { Filesystem, Directory, Encoding } = await import('@capacitor/filesystem')
+        const { Share } = await import('@capacitor/share')
+        const writeResult = await Filesystem.writeFile({
+          path: filename,
+          data: json,
+          directory: Directory.Documents,
+          encoding: Encoding.UTF8,
+          recursive: true,
+        })
+        setBackupMsg(`导出成功，已保存到「文档/${filename}」`)
+        try {
+          await Share.share({
+            title: '备份文件',
+            text: `聊天数据备份 ${filename}`,
+            url: writeResult.uri,
+            dialogTitle: '保存或分享备份文件',
+          })
+        } catch (_) {
+          // 用户取消分享不算失败，文件已写入文档目录
+        }
+      } else {
+        // 电脑浏览器：Blob + <a download> 直接下载到默认下载目录
+        const blob = new Blob([json], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = filename
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+        setBackupMsg('导出成功，已下载备份文件')
+      }
     } catch (e) {
       setBackupMsg(`导出失败：${e.message || e}`)
     } finally {

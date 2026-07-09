@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
-import { getSchedules, addSchedule, updateSchedule, deleteSchedule, getShiftTypes, saveShiftTypes, getShifts, setShift } from '../lib/api'
+import { Solar, Lunar } from 'lunar-javascript'
+import { getSchedules, addSchedule, updateSchedule, deleteSchedule, getShiftTypes, saveShiftTypes, getShifts, setShift, getAnniversaries, addAnniversary, updateAnniversary, deleteAnniversary } from '../lib/api'
+import { syncScheduleNotifications } from '../lib/notify'
 
 // 返回图标
 const BackIcon = () => (
@@ -85,6 +87,70 @@ function toBeijingISO(dateStr, timeStr) {
   return `${dateStr}T${t}:00+08:00`
 }
 
+// ===== 农历 / 黄历 =====
+// 日期格子里的农历简短文本：优先节日 > 节气 > 农历日（初一显示月名）
+function lunarCellText(dateStr) {
+  try {
+    const [y, m, d] = dateStr.split('-').map(Number)
+    const lunar = Solar.fromYmd(y, m, d).getLunar()
+    // 公历节日（如 元旦/圣诞）
+    const solarFestivals = lunar.getSolar().getFestivals()
+    if (solarFestivals && solarFestivals.length) return solarFestivals[0]
+    // 农历节日（如 春节/除夕/端午）
+    const lunarFestivals = lunar.getFestivals()
+    if (lunarFestivals && lunarFestivals.length) return lunarFestivals[0]
+    // 节气（如 立秋/冬至）
+    const jieqi = lunar.getJieQi()
+    if (jieqi) return jieqi
+    // 农历日；初一显示月名（如 六月）
+    const dayStr = lunar.getDayInChinese()
+    if (dayStr === '初一') return lunar.getMonthInChinese() + '月'
+    return dayStr
+  } catch (err) {
+    return ''
+  }
+}
+
+// 当日面板的完整黄历信息
+function lunarDayInfo(dateStr) {
+  try {
+    const [y, m, d] = dateStr.split('-').map(Number)
+    const lunar = Solar.fromYmd(y, m, d).getLunar()
+    return {
+      full: `${lunar.getYearInGanZhi()}年 ${lunar.getMonthInChinese()}月${lunar.getDayInChinese()}`,
+      ganzhi: `${lunar.getYearInGanZhi()}年 ${lunar.getMonthInGanZhi()}月 ${lunar.getDayInGanZhi()}日`,
+      shengxiao: lunar.getYearShengXiao(),
+      yi: (lunar.getDayYi() || []).slice(0, 6).join(' '),
+      ji: (lunar.getDayJi() || []).slice(0, 6).join(' '),
+      chong: `冲${lunar.getDayChongDesc()}`,
+      week: '星期' + lunar.getSolar().getWeekInChinese(),
+      jieqi: lunar.getJieQi() || '',
+    }
+  } catch (err) {
+    return null
+  }
+}
+
+const ANNI_LEAD_OPTIONS = [0, 1, 3, 7]
+
+// 计算某纪念日在给定公历年内的公历日期（YYYY-MM-DD），失败返回 null
+function anniOccurrenceInYear(anni, year) {
+  try {
+    if (anni.calendar === 'lunar') {
+      const solar = Lunar.fromYmd(year, anni.month, anni.day).getSolar()
+      return `${solar.getYear()}-${String(solar.getMonth()).padStart(2, '0')}-${String(solar.getDay()).padStart(2, '0')}`
+    }
+    let d = anni.day
+    const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0
+    if (anni.month === 2 && anni.day === 29 && !leap) d = 28
+    return `${year}-${String(anni.month).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+  } catch (err) {
+    return null
+  }
+}
+
+const CALENDAR_LABELS = { solar: '公历', lunar: '农历' }
+
 function CalendarPanel({ onClose }) {
   const [schedules, setSchedules] = useState([])
   const [isLoading, setIsLoading] = useState(true)
@@ -116,18 +182,37 @@ function CalendarPanel({ onClose }) {
   const [typeDraft, setTypeDraft] = useState([])
   const [isSavingTypes, setIsSavingTypes] = useState(false)
 
+  // ===== 纪念日 =====
+  const [anniversaries, setAnniversaries] = useState([])
+  const [showAnniPanel, setShowAnniPanel] = useState(false)
+  const [showAnniEditor, setShowAnniEditor] = useState(false)
+  const [editingAnni, setEditingAnni] = useState(null)
+  const [anniTitle, setAnniTitle] = useState('')
+  const [anniCalendar, setAnniCalendar] = useState('solar') // solar | lunar
+  const [anniMonth, setAnniMonth] = useState(1)
+  const [anniDay, setAnniDay] = useState(1)
+  const [anniStartYear, setAnniStartYear] = useState('')
+  const [anniLeadDays, setAnniLeadDays] = useState(3)
+  const [anniNote, setAnniNote] = useState('')
+  const [isSavingAnni, setIsSavingAnni] = useState(false)
+  const [deletingAnniId, setDeletingAnniId] = useState(null)
+
   const todayStr = beijingDateStr()
 
   useEffect(() => {
     loadSchedules()
     loadShiftData()
+    loadAnniversaries()
   }, [])
 
   const loadSchedules = async () => {
     setIsLoading(true)
     try {
       const data = await getSchedules()
-      setSchedules(Array.isArray(data) ? data : [])
+      const list = Array.isArray(data) ? data : []
+      setSchedules(list)
+      // 日程有变更后，重排设备端本地通知，保持与数据一致
+      syncScheduleNotifications(list)
     } catch (err) {
       console.error('加载日程失败:', err)
       setSchedules([])
@@ -146,6 +231,16 @@ function CalendarPanel({ onClose }) {
     }
   }
 
+  const loadAnniversaries = async () => {
+    try {
+      const data = await getAnniversaries()
+      setAnniversaries(Array.isArray(data) ? data : [])
+    } catch (err) {
+      console.error('加载纪念日失败:', err)
+      setAnniversaries([])
+    }
+  }
+
   // 班次类型 id -> 类型对象
   const shiftTypeMap = {}
   shiftTypes.forEach(t => { shiftTypeMap[t.id] = t })
@@ -155,6 +250,18 @@ function CalendarPanel({ onClose }) {
   schedules.forEach(s => {
     const d = scheduleDayStr(s.startAt)
     if (d) dayCountMap[d] = (dayCountMap[d] || 0) + 1
+  })
+
+  // 当前视图月份内每天的纪念日映射：{ 'YYYY-MM-DD': [anni, ...] }
+  const anniDayMap = {}
+  anniversaries.forEach(a => {
+    // 覆盖上一年/本年/下一年，确保跨年月份也能命中
+    for (let y = viewYear - 1; y <= viewYear + 1; y++) {
+      const occur = anniOccurrenceInYear(a, y)
+      if (occur && occur.startsWith(`${viewYear}-${String(viewMonth + 1).padStart(2, '0')}`)) {
+        (anniDayMap[occur] = anniDayMap[occur] || []).push(a)
+      }
+    }
   })
 
   // 生成当月网格（含前置补白），每格是 {dateStr, inMonth}
@@ -321,6 +428,70 @@ function CalendarPanel({ onClose }) {
   const grid = buildGrid()
   const totalCount = schedules.length
 
+  // ===== 纪念日相关 =====
+  const openNewAnniEditor = () => {
+    setEditingAnni(null)
+    setAnniTitle('')
+    setAnniCalendar('solar')
+    setAnniMonth(1)
+    setAnniDay(1)
+    setAnniStartYear('')
+    setAnniLeadDays(3)
+    setAnniNote('')
+    setShowAnniEditor(true)
+  }
+
+  const openEditAnniEditor = (a) => {
+    setEditingAnni(a)
+    setAnniTitle(a.title || '')
+    setAnniCalendar(a.calendar || 'solar')
+    setAnniMonth(a.month || 1)
+    setAnniDay(a.day || 1)
+    setAnniStartYear(a.startYear != null ? String(a.startYear) : '')
+    setAnniLeadDays(a.leadDays != null ? a.leadDays : 3)
+    setAnniNote(a.note || '')
+    setShowAnniEditor(true)
+  }
+
+  const closeAnniEditor = () => {
+    setShowAnniEditor(false)
+    setEditingAnni(null)
+  }
+
+  const handleSaveAnni = async () => {
+    if (!anniTitle.trim()) return
+    setIsSavingAnni(true)
+    try {
+      const payload = {
+        title: anniTitle.trim(),
+        calendar: anniCalendar,
+        month: Number(anniMonth),
+        day: Number(anniDay),
+        startYear: anniStartYear ? Number(anniStartYear) : null,
+        leadDays: Number(anniLeadDays),
+        note: anniNote.trim(),
+      }
+      if (editingAnni) {
+        await updateAnniversary(editingAnni.id, payload)
+      } else {
+        await addAnniversary(payload)
+      }
+      closeAnniEditor()
+      await loadAnniversaries()
+    } catch (err) {
+      console.error('保存纪念日失败:', err)
+    } finally {
+      setIsSavingAnni(false)
+    }
+  }
+
+  const confirmDeleteAnni = async () => {
+    if (!deletingAnniId) return
+    await deleteAnniversary(deletingAnniId)
+    setDeletingAnniId(null)
+    await loadAnniversaries()
+  }
+
   return (
     <>
       <div className="fullscreen-overlay"></div>
@@ -331,6 +502,9 @@ function CalendarPanel({ onClose }) {
           </button>
           <h1 className="panel-title">日历</h1>
           <div className="tool-header-actions">
+            <button className="cal-header-icon-btn" onClick={() => setShowAnniPanel(true)} title="纪念日">
+              纪念日
+            </button>
             <button className="cal-header-icon-btn" onClick={openTypeManager} title="班次类型管理">
               <SettingsIcon />
             </button>
@@ -381,13 +555,19 @@ function CalendarPanel({ onClose }) {
                 const isToday = cell.dateStr === todayStr
                 const shiftType = shiftTypeMap[shifts[cell.dateStr]]
                 const isBatchSelected = batchMode && batchDays.includes(cell.dateStr)
+                const lunarText = lunarCellText(cell.dateStr)
+                const dayAnnis = anniDayMap[cell.dateStr] || []
                 return (
                   <div
                     key={cell.dateStr}
-                    className={`cal-cell${isToday ? ' today' : ''}${count ? ' has-event' : ''}${isBatchSelected ? ' batch-selected' : ''}`}
+                    className={`cal-cell${isToday ? ' today' : ''}${count ? ' has-event' : ''}${isBatchSelected ? ' batch-selected' : ''}${dayAnnis.length ? ' has-anni' : ''}`}
                     onClick={() => batchMode ? toggleBatchDay(cell.dateStr) : setSelectedDay(cell.dateStr)}
                   >
                     <span className="cal-day-num">{cell.day}</span>
+                    {lunarText && <span className="cal-lunar-text">{lunarText}</span>}
+                    {dayAnnis.length > 0 && (
+                      <span className="cal-anni-badge" title={dayAnnis.map(a => a.title).join('、')}>♥</span>
+                    )}
                     {shiftType && (
                       <span className="cal-shift-badge" style={{ background: shiftType.color }}>{shiftType.name.slice(0, 2)}</span>
                     )}
@@ -410,6 +590,30 @@ function CalendarPanel({ onClose }) {
                 <CloseIcon size={18} />
               </button>
             </div>
+            {/* 黄历信息 */}
+            {(() => {
+              const info = lunarDayInfo(selectedDay)
+              if (!info) return null
+              const dayAnnis = anniDayMap[selectedDay] || []
+              return (
+                <div className="cal-almanac">
+                  <div className="cal-almanac-top">
+                    <span className="cal-almanac-full">{info.full}</span>
+                    <span className="cal-almanac-sub">{info.week} · 属{info.shengxiao}{info.jieqi ? ' · ' + info.jieqi : ''}</span>
+                  </div>
+                  <div className="cal-almanac-ganzhi">{info.ganzhi} · {info.chong}</div>
+                  {info.yi && <div className="cal-almanac-yi"><span className="cal-almanac-tag yi">宜</span>{info.yi}</div>}
+                  {info.ji && <div className="cal-almanac-ji"><span className="cal-almanac-tag ji">忌</span>{info.ji}</div>}
+                  {dayAnnis.length > 0 && (
+                    <div className="cal-almanac-anni">
+                      {dayAnnis.map(a => (
+                        <span key={a.id} className="cal-almanac-anni-item">♥ {a.title}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
             {/* 当日班次选择 */}
             <div className="cal-day-shifts">
               <span className="cal-day-shifts-label">班次</span>
@@ -583,6 +787,162 @@ function CalendarPanel({ onClose }) {
               <button className="editor-save-btn" onClick={saveTypes} disabled={isSavingTypes}>
                 {isSavingTypes ? '保存中...' : '保存'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 纪念日管理面板 */}
+      {showAnniPanel && (
+        <div className="cal-day-overlay" onClick={() => setShowAnniPanel(false)}>
+          <div className="cal-day-modal" onClick={e => e.stopPropagation()}>
+            <div className="cal-day-header">
+              <h3>纪念日</h3>
+              <button className="editor-close-btn" onClick={() => setShowAnniPanel(false)}>
+                <CloseIcon size={18} />
+              </button>
+            </div>
+            <div className="cal-day-body">
+              {anniversaries.length === 0 ? (
+                <div className="cal-day-empty">还没有纪念日，添加一个吧</div>
+              ) : (
+                anniversaries.map(a => (
+                  <div key={a.id} className="cal-item">
+                    <div className="cal-item-main" onClick={() => openEditAnniEditor(a)}>
+                      <div className="cal-item-title">
+                        <span className="cal-anni-heart">♥</span>
+                        {a.title}
+                        <span className="cal-item-repeat">{CALENDAR_LABELS[a.calendar]} {a.month}月{a.day}日</span>
+                      </div>
+                      <div className="cal-item-note">
+                        {a.daysUntil === 0 ? '就是今天' : `还有 ${a.daysUntil} 天`}
+                        {a.startYear ? ` · 始于 ${a.startYear}` : ''}
+                        {a.note ? ` · ${a.note}` : ''}
+                      </div>
+                    </div>
+                    <div className="cal-item-actions">
+                      <button className="cal-icon-btn" onClick={() => openEditAnniEditor(a)}><EditIcon /></button>
+                      <button className="cal-icon-btn danger" onClick={() => setDeletingAnniId(a.id)}><TrashIcon /></button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="cal-day-footer">
+              <button className="add-tool-btn" onClick={openNewAnniEditor}>
+                <PlusIcon /> 添加纪念日
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 新建 / 编辑纪念日弹窗 */}
+      {showAnniEditor && (
+        <div className="cal-editor-overlay" onClick={closeAnniEditor}>
+          <div className="cal-editor-modal" onClick={e => e.stopPropagation()}>
+            <div className="cal-editor-header">
+              <h3>{editingAnni ? '编辑纪念日' : '新增纪念日'}</h3>
+              <button className="editor-close-btn" onClick={closeAnniEditor}>
+                <CloseIcon size={18} />
+              </button>
+            </div>
+            <div className="cal-editor-body">
+              <div className="cal-field">
+                <label className="cal-label">名称</label>
+                <input
+                  type="text"
+                  className="cal-input"
+                  value={anniTitle}
+                  onChange={e => setAnniTitle(e.target.value)}
+                  placeholder="如：在一起纪念日 / 轩的生日"
+                  maxLength={30}
+                />
+              </div>
+              <div className="cal-field">
+                <label className="cal-label">历法</label>
+                <div className="cal-anni-cal-toggle">
+                  <button
+                    className={`cal-shift-chip${anniCalendar === 'solar' ? ' active' : ''}`}
+                    onClick={() => setAnniCalendar('solar')}
+                  >公历</button>
+                  <button
+                    className={`cal-shift-chip${anniCalendar === 'lunar' ? ' active' : ''}`}
+                    onClick={() => setAnniCalendar('lunar')}
+                  >农历</button>
+                </div>
+              </div>
+              <div className="cal-field-row">
+                <div className="cal-field">
+                  <label className="cal-label">月</label>
+                  <select className="cal-input" value={anniMonth} onChange={e => setAnniMonth(Number(e.target.value))}>
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                      <option key={m} value={m}>{m} 月</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="cal-field">
+                  <label className="cal-label">日</label>
+                  <select className="cal-input" value={anniDay} onChange={e => setAnniDay(Number(e.target.value))}>
+                    {Array.from({ length: 30 }, (_, i) => i + 1).map(d => (
+                      <option key={d} value={d}>{d} 日</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="cal-field-row">
+                <div className="cal-field">
+                  <label className="cal-label">起始年（可选）</label>
+                  <input
+                    type="number"
+                    className="cal-input"
+                    value={anniStartYear}
+                    onChange={e => setAnniStartYear(e.target.value)}
+                    placeholder="如 2023，用于算第几周年"
+                  />
+                </div>
+                <div className="cal-field">
+                  <label className="cal-label">提前提醒</label>
+                  <select className="cal-input" value={anniLeadDays} onChange={e => setAnniLeadDays(Number(e.target.value))}>
+                    {ANNI_LEAD_OPTIONS.map(n => (
+                      <option key={n} value={n}>{n === 0 ? '仅当天' : `提前 ${n} 天`}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="cal-field">
+                <label className="cal-label">备注（可选）</label>
+                <textarea
+                  className="cal-input cal-textarea"
+                  value={anniNote}
+                  onChange={e => setAnniNote(e.target.value)}
+                  placeholder="这一天的意义..."
+                  rows={2}
+                />
+              </div>
+              <p className="cal-hint">恋人 X 会在纪念日当天和临近时主动为你庆祝、倒计时预告。农历纪念日会自动换算成对应公历日。</p>
+            </div>
+            <div className="cal-editor-footer">
+              <button className="editor-cancel-btn" onClick={closeAnniEditor}>取消</button>
+              <button className="editor-save-btn" onClick={handleSaveAnni} disabled={!anniTitle.trim() || isSavingAnni}>
+                {isSavingAnni ? '保存中...' : (editingAnni ? '保存修改' : '保存')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 纪念日删除确认 */}
+      {deletingAnniId && (
+        <div className="delete-confirm-overlay">
+          <div className="delete-confirm-modal">
+            <div className="delete-confirm-header">
+              <h3>确认删除</h3>
+              <p>确定要删除这个纪念日吗？此操作无法撤销。</p>
+            </div>
+            <div className="delete-confirm-actions">
+              <button className="cancel-btn" onClick={() => setDeletingAnniId(null)}>取消</button>
+              <button className="delete-btn" onClick={confirmDeleteAnni}>删除</button>
             </div>
           </div>
         </div>

@@ -11,6 +11,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.108.1",
     "better-sqlite3": "^11.10.0",
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.3.1",
+    "lunar-javascript": "^1.7.7"
   }
 }

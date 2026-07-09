@@ -1,0 +1,118 @@
+/* ===== 跨组件全局响应式（最后加载，保持原文件末尾的覆盖顺序） ===== */
+
+@media (max-width: 768px) {
+  html {
+    /* 移动端保持相同字体基准，确保比例一致 */
+    font-size: 16px;
+  }
+  body {
+    height: 100%;
+    min-height: 100vh;
+    min-height: 100dvh;
+    /* 防止移动端缩放问题 */
+    touch-action: manipulation;
+    -webkit-text-size-adjust: 100%;
+  }
+  #root {
+    height: 100%;
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+  .app-container {
+    height: 100%;
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+  /* 按钮尺寸统一 - 移动端 */
+  .btn,
+  .header-btn,
+  .home-btn,
+  .action-btn {
+    min-height: 36px;
+    min-width: 36px;
+  }
+  /* 防止长按选中 */
+  .chat-item,
+  .message-content,
+  .action-btn,
+  .send-btn,
+  .category-btn {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* 确保点击区域足够大 */
+  button,
+  .chat-item,
+  .custom-select-trigger {
+    min-height: 44px;
+  }
+}
+
+/* ========== 高DPI屏幕优化 ========== */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  .message-content,
+  .input-container,
+  .sidebar {
+    border-width: 0.5px;
+  }
+}
+
+/* ========== 安全区域适配（iPhone X等）========== */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .chat-header {
+    padding-top: calc(12px + env(safe-area-inset-top));
+  }
+
+  .home-header {
+    padding-top: calc(16px + env(safe-area-inset-top));
+  }
+  
+  .input-area {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+  
+  .sidebar-header {
+    padding-top: calc(16px + env(safe-area-inset-top));
+  }
+  
+  .panel-header {
+    padding-top: calc(10px + env(safe-area-inset-top));
+  }
+  
+  .panel-footer {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+}
+
+/* ========== 触摸设备优化 ========== */
+@media (hover: none) and (pointer: coarse) {
+  /* 移除悬停效果，改用点击反馈 */
+  .chat-item:hover,
+  .action-btn:hover,
+  .send-btn:hover,
+  .home-btn:hover,
+  .header-btn:hover,
+  .category-btn:hover {
+    transform: none;
+  }
+  
+  .chat-item:active,
+  .action-btn:active,
+  .send-btn:active,
+  .home-btn:active,
+  .header-btn:active,
+  .category-btn:active {
+    transform: scale(0.96);
+    opacity: 0.9;
+  }
+  
+  /* 增大点击区域 */
+  button,
+  .chat-item,
+  .action-btn,
+  .send-btn {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}

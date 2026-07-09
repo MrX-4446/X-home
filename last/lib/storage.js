@@ -101,6 +101,8 @@ function readBody(req) {
 }
 
 // ---------- 设置默认值 ----------
+// 读取顺序：优先用用户在设置页保存的值（settings 表），未填写(空/未定义)才回退默认值。
+// 这样"不填人设/参数就用 base-rules.md 或此处默认；填了就按用户填的来"。
 function getSetting(key) {
   const defaults = {
     temperature: '0.7',
@@ -109,9 +111,16 @@ function getSetting(key) {
     memory_threshold: '3000',
     keep_recent_messages: '30',
     memory_decay_rate: '0.01',
-    system_prompt: '你是一个智能助手，乐于助人，回答准确。',
+    // 人设默认走 base-rules.md，此处留空；用户在设置页填了才作为额外设定追加
+    system_prompt: '',
   }
-  return defaults[key] || null
+  const saved = readStorage('settings') || {}
+  const val = saved[key]
+  // 未保存、null、空字符串（含仅空白）都视为"未填写"，回退默认值
+  if (val === undefined || val === null || (typeof val === 'string' && val.trim() === '')) {
+    return defaults[key] || null
+  }
+  return val
 }
 
 module.exports = {

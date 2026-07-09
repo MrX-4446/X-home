@@ -26,7 +26,10 @@ import {
   getTools,
   saveTools,
   getSettings,
+  getSchedules,
 } from './lib/api'
+import { syncScheduleNotifications } from './lib/notify'
+import { setupPush } from './lib/push'
 
 function App() {
   // 启动全局错误监控（心跳 + fetch 拦截 + 错误监听）
@@ -34,6 +37,18 @@ function App() {
     errorMonitor.setupFetchInterceptor()
     errorMonitor.startHeartbeat(10000)
     return () => errorMonitor.stopHeartbeat()
+  }, [])
+
+  // 启动时请求通知权限并把日程排成设备端本地通知（断网也能按时弹）
+  useEffect(() => {
+    getSchedules()
+      .then(list => syncScheduleNotifications(list))
+      .catch(err => console.warn('同步本地通知失败:', err?.message || err))
+  }, [])
+
+  // 启动极光推送：初始化并上报设备 RegistrationID（App 关闭也能收推送）
+  useEffect(() => {
+    setupPush().catch(err => console.warn('极光推送初始化失败:', err?.message || err))
   }, [])
 
   const [chats, setChats] = useState([])

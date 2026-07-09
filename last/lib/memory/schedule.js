@@ -8,6 +8,7 @@ const fs = require('fs')
 const path = require('path')
 const { readStorage, writeStorage, getSetting } = require('../storage')
 const { callAIProvider } = require('../ai-provider')
+const { sendPush } = require('../push')
 
 // ========== 可调参数 ==========
 const REMINDER_INTERVAL_MS = 5 * 60 * 1000 // 每 5 分钟扫描一次
@@ -233,6 +234,8 @@ async function reminderTick() {
       const content = await generateReminderMessage(item)
       if (content) {
         pushReminderToChat(content)
+        // 推送到设备通知栏，带 scheduleId 供前端与本地通知去重
+        sendPush('恋人 X', content, { scheduleId: item.id, type: 'schedule' }).catch(() => {})
         console.log(`[日程提醒] 已提醒: ${item.title}`)
       }
     } catch (err) {

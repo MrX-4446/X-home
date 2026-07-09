@@ -1,0 +1,80 @@
+/* ===== 全局：设计令牌 / 重置 / body / 滚动条 / 基准字号 ===== */
+
+:root {
+  --primary-warm-gray: #8A8580;
+  --primary-warm-gray-blue: #7A8A99;
+  --primary-warm-gray-green: #7A8B7D;
+  --primary-warm-gray-dark: #6A6560;
+  --primary-warm-gray-blue-dark: #5A6A79;
+  --primary-warm-gray-green-dark: #5A6B5D;
+  --background-soft: #F5F3EF;
+  --background-card: #EDEBE9;
+  --background-warm: #EDEBE9;
+  --text-primary: #4A4540;
+  --text-secondary: #7A7570;
+  --text-muted: #9A9590;
+  --border-color: #D4D0CB;
+  --shadow-soft: 0 4px 12px rgba(138, 133, 128, 0.08);
+  --shadow-medium: 0 8px 24px rgba(138, 133, 128, 0.12);
+  --radius-sm: 8px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --radius-full: 9999px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Noto Serif SC', serif;
+  background-color: var(--background-soft);
+  color: var(--text-primary);
+  line-height: 1.6;
+  /* dvh 随移动端地址栏动态调整高度，vh 作为老浏览器回退 */
+  min-height: 100vh;
+  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
+  margin: 0;
+  padding: 0;
+}
+
+#root {
+  min-height: 100vh;
+  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
+}
+
+.app-container {
+  display: flex;
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* Scrollbar Styles */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--primary-warm-gray-blue);
+}
+
+/* 基础响应式设置 - 使用 rem 确保比例一致性 */
+html {
+  /* 桌面端基准字体 16px */
+  font-size: 16px;
+}

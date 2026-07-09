@@ -1,0 +1,491 @@
+/* ===== AI 配置面板 ===== */
+
+/* AI Config Panel Styles */
+.ai-config-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000000;
+  animation: fadeIn 0.2s ease;
+}
+
+.ai-config-panel {
+  background-color: var(--background-card);
+  border-radius: var(--radius-lg);
+  width: 90%;
+  max-width: 600px;
+  max-height: 85vh;
+  overflow: hidden;
+  box-shadow: var(--shadow-medium);
+  animation: slideUp 0.3s ease;
+}
+
+.ai-config-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.ai-config-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.ai-config-close-btn {
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+}
+
+.ai-config-close-btn:hover {
+  background-color: rgba(138, 133, 128, 0.1);
+  color: var(--text-secondary);
+}
+
+.ai-config-content {
+  padding: 24px;
+  overflow-y: auto;
+  max-height: calc(85vh - 140px);
+}
+
+.ai-health-panel {
+  margin-bottom: 20px;
+  padding: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background-color: rgba(122, 138, 153, 0.08);
+}
+
+.ai-health-panel.ok {
+  border-color: rgba(80, 140, 100, 0.35);
+}
+
+.ai-health-panel.warning {
+  border-color: rgba(180, 120, 70, 0.35);
+}
+
+.ai-health-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.ai-health-header h3 {
+  margin: 0 0 4px;
+  color: var(--text-primary);
+  font-size: 15px;
+}
+
+.ai-health-header p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.ai-health-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ai-health-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.ai-health-dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ai-health-dot.ok {
+  background-color: var(--primary-warm-gray-green);
+}
+
+.ai-health-dot.error {
+  background-color: #b45f5f;
+}
+
+.ai-health-check strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.ai-health-check p {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ai-provider-count {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.ai-list-section {
+  margin-bottom: 28px;
+}
+
+.ai-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.ai-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--primary-warm-gray-blue);
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.add-ai-btn {
+  padding: 8px 16px;
+  background-color: var(--primary-warm-gray-blue);
+  color: white;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.add-ai-btn:hover {
+  background-color: var(--primary-warm-gray-blue-dark);
+}
+
+.ai-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  background-color: rgba(255, 255, 255, 0.4);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+}
+
+.ai-item:hover {
+  background-color: rgba(255, 255, 255, 0.6);
+}
+
+.ai-item.selected {
+  border-color: var(--primary-warm-gray-blue);
+  background-color: rgba(122, 138, 153, 0.05);
+}
+
+.ai-item.disabled {
+  opacity: 0.5;
+}
+
+.ai-item-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ai-status-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid rgba(138, 133, 128, 0.3);
+  background-color: transparent;
+  color: transparent;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.ai-status-btn.active {
+  background-color: var(--primary-warm-gray-blue);
+  border-color: var(--primary-warm-gray-blue);
+  color: white;
+}
+
+.ai-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ai-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.ai-endpoint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ai-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.test-ai-btn {
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background-color: rgba(122, 138, 153, 0.08);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.test-ai-btn:hover:not(:disabled) {
+  border-color: var(--primary-warm-gray-blue);
+  color: var(--primary-warm-gray-blue);
+}
+
+.test-ai-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.delete-ai-btn {
+  background: none;
+  border: none;
+  font-size: 16px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+  opacity: 0;
+}
+
+.ai-item:hover .delete-ai-btn {
+  opacity: 1;
+}
+
+.delete-ai-btn:hover {
+  background-color: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+.ai-status-message {
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background-color: rgba(122, 138, 153, 0.08);
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+/* Add AI Form */
+.ai-add-section {
+  padding-top: 20px;
+  border-top: 1px solid var(--border-color);
+}
+
+.ai-add-section .ai-section-title {
+  margin-bottom: 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.ai-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 0;
+}
+
+.ai-form-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ai-form-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.ai-form-input {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background-color: rgba(255, 255, 255, 0.6);
+  color: var(--text-primary);
+  font-size: 14px;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.ai-form-input:focus {
+  border-color: var(--primary-warm-gray-blue);
+  box-shadow: 0 0 0 3px rgba(122, 138, 153, 0.1);
+}
+
+/* 下拉选择框优化样式 */
+select.ai-form-input {
+  cursor: pointer;
+  appearance: none;
+  background-image: 
+    linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+    linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position: 
+    calc(100% - 24px) calc(1em + 2px),
+    calc(100% - 16px) calc(1em + 2px);
+  background-size: 
+    8px 8px,
+    8px 8px;
+  background-repeat: no-repeat;
+  padding-right: 40px;
+  transition: all 0.2s ease;
+}
+
+select.ai-form-input:hover {
+  border-color: var(--primary-warm-gray-blue);
+  background-image: 
+    linear-gradient(45deg, transparent 50%, var(--primary-warm-gray-blue-dark) 50%),
+    linear-gradient(135deg, var(--primary-warm-gray-blue-dark) 50%, transparent 50%);
+}
+
+select.ai-form-input:focus {
+  background-image: 
+    linear-gradient(45deg, transparent 50%, var(--primary-warm-gray-blue-dark) 50%),
+    linear-gradient(135deg, var(--primary-warm-gray-blue-dark) 50%, transparent 50%);
+}
+
+select.ai-form-input option {
+  background-color: var(--background-soft);
+  color: var(--text-primary);
+  padding: 12px;
+  font-size: 14px;
+}
+
+select.ai-form-input option:first-child {
+  color: var(--text-muted);
+}
+
+.ai-form-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.ai-form-btn {
+  flex: 1;
+  padding: 12px 16px;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.ai-form-btn-primary {
+  background-color: var(--primary-warm-gray-blue);
+  color: white;
+}
+
+.ai-form-btn-primary:hover {
+  background-color: var(--primary-warm-gray-blue-dark);
+}
+
+.ai-form-btn-secondary {
+  background-color: rgba(138, 133, 128, 0.1);
+  color: var(--text-secondary);
+}
+
+.ai-form-btn-secondary:hover {
+  background-color: rgba(138, 133, 128, 0.2);
+}
+
+/* Footer */
+.ai-config-footer {
+  padding: 16px 32px;
+  border-top: 1px solid var(--border-color);
+  background-color: rgba(255, 255, 255, 0.3);
+}
+
+.ai-config-btn {
+  width: 100%;
+  padding: 12px 16px;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.ai-config-btn-secondary {
+  background-color: rgba(138, 133, 128, 0.1);
+  color: var(--text-secondary);
+}
+
+.ai-config-btn-secondary:hover {
+  background-color: rgba(138, 133, 128, 0.2);
+}
+
+/* AI Config Button in App Settings */
+.ai-config-btn {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background-color: rgba(122, 138, 153, 0.05);
+  color: var(--primary-warm-gray-blue);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+}
+
+.ai-config-btn:hover {
+  background-color: rgba(122, 138, 153, 0.1);
+  border-color: var(--primary-warm-gray-blue);
+}
+

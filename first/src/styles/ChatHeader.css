@@ -1,0 +1,235 @@
+/* ===== 顶栏 / 菜单按钮 ===== */
+
+/* Header Styles */
+.chat-header {
+  background-color: var(--background-warm);
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  box-sizing: border-box;
+  min-height: 81px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.home-btn {
+  padding: 10px 20px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-full);
+  background-color: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.home-btn:hover {
+  background-color: rgba(138, 133, 128, 0.1);
+  color: var(--text-primary);
+}
+
+.home-btn.active {
+  background-color: var(--primary-warm-gray-green-dark);
+  color: white;
+  border-color: var(--primary-warm-gray-green-dark);
+}
+
+.avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-full);
+  background-color: var(--primary-warm-gray-blue);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.chat-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.status {
+  font-size: 12px;
+  color: var(--primary-warm-gray-green);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--primary-warm-gray-green);
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-btn {
+  padding: 10px 20px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-full);
+  background-color: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.header-btn:hover {
+  background-color: rgba(107, 123, 138, 0.08);
+  color: var(--text-primary);
+}
+
+.header-btn.active {
+  background-color: var(--primary-warm-gray-green-dark);
+  color: white;
+  border-color: var(--primary-warm-gray-green-dark);
+}
+
+/* Menu Button */
+.menu-btn {
+  display: block;
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  transition: all 0.3s ease;
+  margin-right: 8px;
+  position: relative;
+  z-index: 101;
+}
+
+.menu-btn:hover {
+  background-color: rgba(107, 123, 138, 0.1);
+  color: var(--text-primary);
+}
+
+/* ---------- 响应式 ---------- */
+
+@media (max-width: 1024px) and (min-width: 769px) {
+  .chat-header {
+    padding: 16px 20px;
+    min-height: 72px;
+  }
+  .chat-title {
+    font-size: 17px;
+  }
+}
+
+@media (max-width: 768px) {
+  .menu-btn {
+    display: block;
+  }
+  /* 移动端侧边栏打开时隐藏菜单按钮 */
+  .sidebar-open .menu-btn {
+    display: none;
+  }
+  .chat-header {
+    padding: 16px;
+  }
+  /* 头部 - 移动端优化 */
+  .chat-header {
+    padding: 12px 16px;
+    min-height: 64px;
+    gap: 8px;
+  }
+  .header-left,
+  .header-right {
+    gap: 8px;
+  }
+  .avatar {
+    width: 40px;
+    height: 40px;
+    font-size: 16px;
+  }
+  .chat-title {
+    font-size: 16px;
+  }
+  .home-btn,
+  .header-btn {
+    padding: 8px 14px;
+    font-size: 12px;
+  }
+  /* 状态指示器 - 移动端 */
+  .status {
+    font-size: 11px;
+  }
+  .status-dot {
+    width: 6px;
+    height: 6px;
+  }
+}
+
+@media (max-width: 480px) {
+  .chat-header {
+    padding: 10px 12px;
+    min-height: 56px;
+  }
+  .avatar {
+    width: 36px;
+    height: 36px;
+    font-size: 14px;
+  }
+  .chat-title {
+    font-size: 15px;
+  }
+  .home-btn,
+  .header-btn {
+    padding: 6px 10px;
+    font-size: 11px;
+  }
+  .header-left,
+  .header-right {
+    gap: 6px;
+  }
+}
+
+@media (max-height: 500px) and (orientation: landscape) {
+  .chat-header {
+    padding: 8px 16px;
+    min-height: 48px;
+  }
+  .avatar {
+    width: 32px;
+    height: 32px;
+    font-size: 13px;
+  }
+  .chat-title {
+    font-size: 14px;
+  }
+}
