@@ -380,6 +380,8 @@ async function callAIProviderStream(provider, messages, options = {}, onDelta) {
   }
 
   let fullContent = ''
+  // 思考链累积：既实时推送给前端，也整体累积用于随回复入库（供历史消息折叠展示）
+  let fullReasoning = ''
   // 工具调用在流式模式下按 index 分片下发，需按索引累积拼接
   const toolCallsMap = {}
   let finishReason = null
@@ -388,7 +390,9 @@ async function callAIProviderStream(provider, messages, options = {}, onDelta) {
   // 思考链分流器：正文里夹带的 <thinking>...</thinking> 实时改走 reasoning 通道，
   // 只有标签外的文本累积进 fullContent（即最终 reply / 入库正文）。
   const emitReasoning = (t) => {
-    if (t && typeof onDelta === 'function') onDelta(t, 'reasoning')
+    if (!t) return
+    fullReasoning += t
+    if (typeof onDelta === 'function') onDelta(t, 'reasoning')
   }
   const emitContent = (t) => {
     if (!t) return
@@ -467,6 +471,7 @@ async function callAIProviderStream(provider, messages, options = {}, onDelta) {
   return {
     ok: true,
     reply: fullContent,
+    reasoning: fullReasoning,
     message,
     toolCalls,
     finishReason,

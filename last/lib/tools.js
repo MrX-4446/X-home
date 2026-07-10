@@ -2,6 +2,103 @@
 // 从 server.local.js 抽离：工具定义 + 执行引擎
 // 本模块完全自包含，不依赖其他业务模块
 
+const fs = require('fs')
+const path = require('path')
+
+// ========== 只读代码能力：路径安全护栏 ==========
+// 铁律：只读、白名单、无副作用。以下五道护栏缺一不可。
+
+// 项目根：本文件在 d:\X\last\lib 下，回退两级指向 d:\X
+const PROJECT_ROOT = path.resolve(__dirname, '..', '..')
+
+// 目录白名单（相对项目根的前缀，默认拒绝、白名单放行）
+const READ_WHITELIST = [
+  'first/src/',           // 前端源码
+  'last/lib/',            // 后端核心逻辑
+  'last/server.local.js', // 后端主文件
+  'last/base-rules.md',   // X 自己的人格规则
+  '优化方案/',            // 设计文档
+]
+// 根目录下允许直接读的说明文档
+const ROOT_DOC_WHITELIST = ['README.md', '功能清单.md']
+
+// 允许读取的文本类扩展名
+const READ_EXT_WHITELIST = new Set([
+  '.js', '.jsx', '.ts', '.tsx', '.css', '.md', '.json', '.txt', '.html',
+])
+
+// 单文件读取上限（约 60KB）
+const READ_MAX_BYTES = 60 * 1024
+
+// 敏感文件/目录黑名单：即使落在白名单内，命中也拒绝
+function isBlacklisted(relPath) {
+  const p = relPath.replace(/\\/g, '/').toLowerCase()
+  const base = p.split('/').pop() || ''
+  // .env / .env.* / 密钥文件
+  if (base === '.env' || base.startsWith('.env.')) return true
+  if (/\.(key|pem)$/.test(base)) return true
+  if (base.includes('secret') || base.includes('credential')) return true
+  // 数据库文件
+  if (/\.(db|db-wal|db-shm|sqlite)$/.test(base)) return true
+  if (base === 'package-lock.json') return true
+  // 敏感/噪音目录
+  const badDirs = ['.local-storage/', 'node_modules/', 'android/', '.git/', 'dist/', 'build/']
+  if (badDirs.some(d => p.includes(d))) return true
+  return false
+}
+
+// 把用户传入的相对路径解析为绝对路径，并做穿越/白名单校验。
+// 返回 { ok, abs, rel, error }。isFile 为 true 时额外校验扩展名。
+function resolveSafePath(userPath, { isFile = false } = {}) {
+  const raw = String(userPath || '').trim()
+
+  // 缺省表示项目根（仅列目录时允许）
+  if (!raw) {
+    if (isFile) return { ok: false, error: '请提供要读取的文件路径' }
+    return { ok: true, abs: PROJECT_ROOT, rel: '' }
+  }
+
+  // 拒绝绝对路径与 .. 穿越（双保险）
+  if (path.isAbsolute(raw) || /^[a-zA-Z]:/.test(raw)) {
+    return { ok: false, error: '只接受相对项目根的路径，不接受绝对路径' }
+  }
+  if (raw.split(/[\\/]/).some(seg => seg === '..')) {
+    return { ok: false, error: '路径不合法（禁止使用 .. 跨目录）' }
+  }
+
+  const abs = path.resolve(PROJECT_ROOT, raw)
+  // 校验解析结果仍在项目根之内
+  if (abs !== PROJECT_ROOT && !abs.startsWith(PROJECT_ROOT + path.sep)) {
+    return { ok: false, error: '路径超出项目范围，拒绝访问' }
+  }
+
+  const rel = path.relative(PROJECT_ROOT, abs).replace(/\\/g, '/')
+
+  // 黑名单优先拦截
+  if (isBlacklisted(rel)) {
+    return { ok: false, error: '该文件属于敏感区（密钥/数据库/依赖等），无权读取' }
+  }
+
+  // 白名单校验：命中目录前缀、精确文件、或根目录说明文档
+  const inWhitelist =
+    rel === '' ||
+    READ_WHITELIST.some(prefix => rel === prefix.replace(/\/$/, '') || rel.startsWith(prefix)) ||
+    ROOT_DOC_WHITELIST.includes(rel)
+  if (!inWhitelist) {
+    return { ok: false, error: '该路径不在允许读取的白名单目录内' }
+  }
+
+  // 文件需校验扩展名
+  if (isFile) {
+    const ext = path.extname(rel).toLowerCase()
+    if (!READ_EXT_WHITELIST.has(ext)) {
+      return { ok: false, error: `不支持读取该类型文件（${ext || '无扩展名'}），只能读文本类源码/文档` }
+    }
+  }
+
+  return { ok: true, abs, rel }
+}
+
 function normalizeToolName(name) {
   const text = String(name || 'custom_tool')
   const readableNameMap = {
@@ -18,6 +115,8 @@ function normalizeToolName(name) {
     '今日运势': 'daily_fortune',
     '周公解梦': 'dream_interpretation',
     '小六壬': 'liuren_divination',
+    '读取项目文件': 'read_project_file',
+    '浏览项目结构': 'list_project_dir',
   }
   if (readableNameMap[text]) return readableNameMap[text]
   return text
@@ -149,6 +248,20 @@ function buildToolDefinitions(enabledTools) {
         question: { type: 'string', description: '想占问的事，如「今天适合表白吗」' },
       },
       required: ['question'],
+    },
+    '读取项目文件': {
+      description: '读取你自己这个项目里的源代码文件（只读）。当轩问起你是怎么被造出来的、想和你一起看某段代码、或你想基于真实代码回答「我的记忆/工具是怎么实现的」时使用。只能读白名单内的源码与文档，读不到密钥、聊天数据库等敏感文件——遇到读不到的就如实说看不到，别编。',
+      parameters: {
+        path: { type: 'string', description: '相对项目根的文件路径，如 "last/lib/storage.js"、"first/src/App.jsx"' },
+      },
+      required: ['path'],
+    },
+    '浏览项目结构': {
+      description: '浏览你自己这个项目的目录结构（只读，不递归全展开，按需逐层看）。想了解项目由哪些文件组成、再决定读哪个文件时使用。只列白名单目录，敏感目录（数据库、密钥、node_modules 等）不会出现。',
+      parameters: {
+        path: { type: 'string', description: '相对项目根的目录路径，缺省为项目根目录' },
+      },
+      required: [],
     },
   }
 
@@ -341,6 +454,20 @@ async function executeToolCall(toolCall, enabledTools) {
       return { ok: true, name: toolName, input: question, output: JSON.stringify(result, null, 2) }
     }
 
+    // ========== 只读代码能力（只读、白名单、无副作用）==========
+
+    if (toolName === '读取项目文件') {
+      const output = readProjectFile(String(args.path || args.query || ''))
+      if (output.ok) return { ok: true, name: toolName, input: output.rel, output: output.text }
+      return { ok: false, name: toolName, input: String(args.path || ''), error: output.error }
+    }
+
+    if (toolName === '浏览项目结构') {
+      const output = listProjectDir(String(args.path || args.query || ''))
+      if (output.ok) return { ok: true, name: toolName, input: output.rel || '(项目根)', output: output.text }
+      return { ok: false, name: toolName, input: String(args.path || ''), error: output.error }
+    }
+
     // 默认工具响应
     return {
       ok: true,
@@ -352,89 +479,6 @@ async function executeToolCall(toolCall, enabledTools) {
   } catch (err) {
     return { ok: false, name: toolName, error: err.message }
   }
-}
-
-// ========== 旧版工具执行链（processToolCalls / executeTool 系列） ==========
-
-async function processToolCalls(aiReply) {
-  const results = []
-
-  try {
-    const jsonLines = aiReply.match(/\{[\s\S]*?\}/g)
-    if (!jsonLines) return results
-
-    for (const jsonStr of jsonLines) {
-      try {
-        const toolCall = JSON.parse(jsonStr)
-        if (toolCall.tool) {
-          const result = await executeTool(toolCall.tool, toolCall.params || {})
-          results.push({ tool: toolCall.tool, ...result })
-        }
-      } catch (e) {
-        console.warn('解析工具调用失败:', e)
-      }
-    }
-  } catch (e) {
-    console.warn('处理工具调用失败:', e)
-  }
-
-  return results
-}
-
-async function executeTool(toolName, params) {
-  const toolMap = {
-    '网页搜索': { type: 'cloud', handler: () => executeSearch(params.query) },
-    '计算器': { type: 'tool', handler: () => executeCalculator(params.expression) },
-    '天气查询': { type: 'mobile_app', handler: () => executeMobileApp('天气', params) },
-    '翻译': { type: 'mobile_app', handler: () => executeMobileApp('翻译', params) },
-    '代码执行': { type: 'tool', handler: async () => {
-      const result = await executeCode(params.code)
-      return result.success ? { success: true, result: result.output } : { success: false, error: result.error }
-    }},
-  }
-
-  const toolInfo = toolMap[toolName]
-  if (!toolInfo) {
-    return { success: false, error: `未知工具: ${toolName}` }
-  }
-
-  return await toolInfo.handler()
-}
-
-async function executeMobileApp(appName, params) {
-  const appSchemes = {
-    '天气': {
-      ios: `weather://?city=${encodeURIComponent(params.city || '')}`,
-      android: `weather://?city=${encodeURIComponent(params.city || '')}`,
-      fallback: `https://m.weather.com.cn/${params.city || ''}`,
-      message: params.city ? `正在打开天气应用查询「${params.city}」` : '正在打开天气应用'
-    },
-    '翻译': {
-      ios: `translate://?text=${encodeURIComponent(params.text || '')}&to=${encodeURIComponent(params.target || '')}`,
-      android: `translate://?text=${encodeURIComponent(params.text || '')}&to=${encodeURIComponent(params.target || '')}`,
-      fallback: `https://translate.google.com/?text=${encodeURIComponent(params.text || '')}&tl=${getLangCode(params.target)}`,
-      message: params.text ? `正在打开翻译应用翻译「${params.text}」到${params.target}` : '正在打开翻译应用'
-    },
-  }
-
-  const scheme = appSchemes[appName]
-  if (scheme) {
-    return {
-      success: true,
-      result: scheme.message,
-      appType: 'mobile_app',
-      iosUrl: scheme.ios,
-      androidUrl: scheme.android,
-      fallbackUrl: scheme.fallback
-    }
-  }
-
-  return { success: false, error: `不支持的应用: ${appName}` }
-}
-
-function getLangCode(lang) {
-  const langs = { '英语': 'en', '日语': 'ja', '韩语': 'ko', '中文': 'zh', '法语': 'fr', '德语': 'de', '西班牙语': 'es' }
-  return langs[lang] || 'en'
 }
 
 async function executeSearch(query) {
@@ -635,16 +679,6 @@ function decodeEntities(str) {
     .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code, 10)))
 }
 
-async function executeCalculator(expression) {
-  try {
-    const sanitized = expression.replace(/[^0-9+\-*/().\s]/g, '')
-    const result = eval(sanitized)
-    return { success: true, result: String(result) }
-  } catch (e) {
-    return { success: false, error: '计算失败: ' + e.message }
-  }
-}
-
 async function executeWeather(city) {
   try {
     const weatherUrl = `https://wttr.in/${encodeURIComponent(city)}?format=j1`
@@ -812,17 +846,88 @@ async function executeCode(code) {
   })
 }
 
+// ========== 只读代码能力：工具实现（只用 readFileSync / readdirSync）==========
+
+// 读取项目文件：经护栏校验后返回带行号的文本，超长截断
+function readProjectFile(userPath) {
+  const check = resolveSafePath(userPath, { isFile: true })
+  if (!check.ok) return check
+
+  let stat
+  try {
+    stat = fs.statSync(check.abs)
+  } catch {
+    return { ok: false, error: `文件不存在或无法访问：${check.rel}` }
+  }
+  if (!stat.isFile()) {
+    return { ok: false, error: `${check.rel} 不是文件（如果是目录，请用「浏览项目结构」）` }
+  }
+
+  let raw = fs.readFileSync(check.abs, 'utf8')
+  let truncatedNote = ''
+  if (Buffer.byteLength(raw, 'utf8') > READ_MAX_BYTES) {
+    raw = raw.slice(0, READ_MAX_BYTES)
+    truncatedNote = '\n\n（文件较长，已截断）'
+  }
+
+  // 带行号，便于讨论具体位置
+  const lines = raw.split('\n')
+  const width = String(lines.length).length
+  const numbered = lines
+    .map((line, i) => `${String(i + 1).padStart(width, ' ')}→${line}`)
+    .join('\n')
+
+  const header = `文件：${check.rel}\n\n`
+  return { ok: true, rel: check.rel, text: header + numbered + truncatedNote }
+}
+
+// 浏览项目结构：列出目录下的子目录与文件，过滤黑名单项
+function listProjectDir(userPath) {
+  const check = resolveSafePath(userPath, { isFile: false })
+  if (!check.ok) return check
+
+  let stat
+  try {
+    stat = fs.statSync(check.abs)
+  } catch {
+    return { ok: false, error: `目录不存在或无法访问：${check.rel || '(项目根)'}` }
+  }
+  if (!stat.isDirectory()) {
+    return { ok: false, error: `${check.rel} 不是目录（如果是文件，请用「读取项目文件」）` }
+  }
+
+  let entries
+  try {
+    entries = fs.readdirSync(check.abs, { withFileTypes: true })
+  } catch (e) {
+    return { ok: false, error: '读取目录失败：' + e.message }
+  }
+
+  const dirs = []
+  const files = []
+  for (const ent of entries) {
+    const childRel = check.rel ? `${check.rel}/${ent.name}` : ent.name
+    if (isBlacklisted(childRel + (ent.isDirectory() ? '/' : ''))) continue
+    if (ent.isDirectory()) dirs.push(ent.name + '/')
+    else files.push(ent.name)
+  }
+  dirs.sort()
+  files.sort()
+
+  const items = [...dirs, ...files]
+  if (items.length === 0) {
+    return { ok: true, rel: check.rel, text: `目录 ${check.rel || '(项目根)'} 下没有可显示的内容。` }
+  }
+  const header = `目录：${check.rel || '(项目根)'}\n\n`
+  return { ok: true, rel: check.rel, text: header + items.join('\n') }
+}
+
 module.exports = {
   normalizeToolName,
   buildToolDefinitions,
   executeToolCall,
-  processToolCalls,
-  executeTool,
-  executeMobileApp,
-  getLangCode,
   executeSearch,
   executeFetchUrl,
-  executeCalculator,
   executeWeather,
   executeTranslate,
   executeCode,

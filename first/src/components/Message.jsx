@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 // 内心独白（心语）标记：AI 在回复里埋 [HEART:内心独白]，前端解析后剥离正文、单独渲染
 // 兼容模型可能输出的全角括号/冒号（如 ［HEART：］【HEART：】），并兜底无括号写法
 const HEART_REGEX_BRACKET = /[[［【]\s*HEART\s*[:：]\s*([\s\S]*?)\s*[\]］】]/i
@@ -75,6 +77,21 @@ function ToolCallTimeline({ toolResults }) {
   )
 }
 
+// 历史消息里的思考链折叠块：默认折叠，点击展开回看（内容不参与后续对话）
+function ReasoningBlock({ reasoning }) {
+  const [expanded, setExpanded] = useState(false)
+  if (!reasoning) return null
+  return (
+    <div className="reasoning-panel reasoning-panel--history">
+      <button className="reasoning-toggle" onClick={() => setExpanded(v => !v)}>
+        <span className="reasoning-toggle-icon">{expanded ? '▾' : '▸'}</span>
+        <span>已深度思考</span>
+      </button>
+      {expanded && <div className="reasoning-content">{reasoning}</div>}
+    </div>
+  )
+}
+
 // 消息头像：assistant 用 X 的头像，user 用轩的头像，均支持文字占位
 function MessageAvatar({ role, chatAvatar, userAvatar, hasHeart }) {
   const isAssistant = role === 'assistant'
@@ -93,11 +110,14 @@ function Message({ message, status, chatAvatar, userAvatar }) {
   const { text, toolResults } = parsed
   // 优先用存储的 heart 字段（后端已从正文剥离）；老消息/兜底再取正文里解析到的
   const heart = message.heart ?? parsed.heart
+  // 思考链：仅 assistant 消息可能有；折叠展示，不影响正文
+  const reasoning = message.role === 'assistant' ? message.reasoning : null
 
   return (
     <div className={`message ${message.role}`}>
       <MessageAvatar role={message.role} chatAvatar={chatAvatar} userAvatar={userAvatar} hasHeart={!!heart} />
       <div className="message-body">
+        {reasoning && <ReasoningBlock reasoning={reasoning} />}
         <div className="message-content">{text}</div>
         {heart && (
           <div className="message-heart">

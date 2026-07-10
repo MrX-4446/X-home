@@ -374,6 +374,7 @@ function App() {
           role: 'assistant',
           content: `${aiResult.reply || '（AI 没有返回内容）'}${toolMetadata}`,
           heart: aiResult.heart || null,
+          reasoning: aiResult.reasoning || null,
         })
 
         await updateChatDB(chatId, {

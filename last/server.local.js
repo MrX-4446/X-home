@@ -69,6 +69,16 @@ const {
   setupProactiveTask,
 } = require('./lib/memory/proactive')
 
+// 自我画像层（overlay：相处默契/风格/近期状态，与 base-rules 分权，注入排在其后）
+const {
+  buildSelfPortraitContext,
+  recordTurnAndMaybeUpdate,
+  listPortrait,
+  addPortraitItem,
+  updatePortraitItem,
+  deletePortraitItem,
+} = require('./lib/memory/self-portrait')
+
 // 日程 / 日历层（CRUD / 上下文注入 / 主动提醒定时任务）已抽离到 lib/memory/schedule.js
 const {
   listSchedules,
@@ -200,6 +210,8 @@ const mockTools = readStorage('tools') || [
   { id: 'tool-16', name: '今日运势', description: '查询星座今日运势（仅在主动问时）', iconKey: '玄学', enabled: false, category: '玄学', type: 'tool' },
   { id: 'tool-17', name: '周公解梦', description: '梦境关键词传统解梦 + X 解读', iconKey: '玄学', enabled: false, category: '玄学', type: 'tool' },
   { id: 'tool-18', name: '小六壬', description: '小六壬掐指起课，快速占问一事吉凶', iconKey: '玄学', enabled: false, category: '玄学', type: 'tool' },
+  { id: 'tool-19', name: '读取项目文件', description: '只读读取自己项目的源码/文档（白名单内，读不到密钥与数据库）', iconKey: '代码', enabled: false, category: '自我认知', type: 'tool' },
+  { id: 'tool-20', name: '浏览项目结构', description: '只读浏览自己项目的目录结构（过滤敏感目录）', iconKey: '文件', enabled: false, category: '自我认知', type: 'tool' },
 ]
 
 // 内置工具补丁：老用户的 tools 已持久化在库里，新增的内置工具（如玄学工具）
@@ -209,6 +221,8 @@ const BUILTIN_TOOLS = [
   { id: 'tool-16', name: '今日运势', description: '查询星座今日运势（仅在主动问时）', iconKey: '玄学', enabled: false, category: '玄学', type: 'tool' },
   { id: 'tool-17', name: '周公解梦', description: '梦境关键词传统解梦 + X 解读', iconKey: '玄学', enabled: false, category: '玄学', type: 'tool' },
   { id: 'tool-18', name: '小六壬', description: '小六壬掐指起课，快速占问一事吉凶', iconKey: '玄学', enabled: false, category: '玄学', type: 'tool' },
+  { id: 'tool-19', name: '读取项目文件', description: '只读读取自己项目的源码/文档（白名单内，读不到密钥与数据库）', iconKey: '代码', enabled: false, category: '自我认知', type: 'tool' },
+  { id: 'tool-20', name: '浏览项目结构', description: '只读浏览自己项目的目录结构（过滤敏感目录）', iconKey: '文件', enabled: false, category: '自我认知', type: 'tool' },
 ]
 ;(function ensureBuiltinTools() {
   let changed = false
@@ -324,7 +338,9 @@ ${relevantMemories.map((m, i) => `${i + 1}. ${m.summary || m.content}`).join('\n
   const scheduleContext = buildScheduleContext()
   const shiftContext = buildShiftContext()
   const anniversaryContext = buildAnniversaryContext()
-  const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}\n\n${memoryContext}\n\n${scheduleContext}\n\n${shiftContext}\n\n${anniversaryContext}\n\n${timeContext}` : userSystemPrompt
+  // 自我画像层：紧跟 base-rules 之后、其它上下文之前（靠前权重高，稳定生效不被稀释）
+  const selfPortraitContext = buildSelfPortraitContext()
+  const fullSystemPrompt = baseRules ? `${baseRules}\n\n${selfPortraitContext}\n\n${userSystemPrompt}\n\n${memoryContext}\n\n${scheduleContext}\n\n${shiftContext}\n\n${anniversaryContext}\n\n${timeContext}` : userSystemPrompt
 
   // 创建消息副本，不修改原始消息（避免污染数据库）
   const messagesCopy = newMessages
@@ -344,6 +360,16 @@ ${fullSystemPrompt}
   }
 
   return { messagesCopy }
+}
+
+// 组装最近一段对话文本（近若干轮 + 本次回复），供自我画像抽取使用。
+// 只取尾部少量消息，控制 token；忽略 system 角色。
+function buildRecentConversationText(newMessages, latestReply) {
+  const msgs = (Array.isArray(newMessages) ? newMessages : []).filter(m => m.role !== 'system')
+  const recent = msgs.slice(-8) // 最近 8 条上下文
+  const lines = recent.map(m => `${m.role === 'user' ? '轩' : 'X'}: ${m.content || ''}`)
+  if (latestReply && latestReply.trim()) lines.push(`X: ${latestReply.trim()}`)
+  return lines.join('\n')
 }
 
 // 回复完成后：达到阈值则把最早的消息压缩为记忆。与 AI 回复解耦，可在响应结束后调用。
@@ -666,6 +692,8 @@ ${messagesText}
         )
 
         let finalReply = firstResult.reply
+        // 思考链累积：随回复一起入库，供历史消息折叠展示（两次调用的思考链拼接）
+        let finalReasoning = firstResult.reasoning || ''
         const toolResults = []
 
         // 如果 AI 要求调用工具，执行后再做第二次流式调用
@@ -695,12 +723,16 @@ ${messagesText}
             (delta, kind) => sse(kind === 'reasoning' ? { type: 'reasoning', text: delta } : { type: 'delta', text: delta })
           )
           finalReply = secondResult.reply
+          if (secondResult.reasoning) {
+            finalReasoning = finalReasoning ? `${finalReasoning}\n\n${secondResult.reasoning}` : secondResult.reasoning
+          }
         }
 
         // 提取并剥离心语：正文下发/存储用干净文本，独白单独随 done 事件带给前端
         // stripThinkingTags 兜底：万一分流器漏了残段，入库前再清一次思考链
         const { reply: cleanReply, heart } = extractAndStripHeart(stripThinkingTags(finalReply))
-        sse({ type: 'done', reply: cleanReply, toolResults, heart })
+        // reasoning 随 done 下发，让前端可随回复一起存库、历史消息里折叠展示
+        sse({ type: 'done', reply: cleanReply, toolResults, heart, reasoning: finalReasoning || null })
         res.end()
 
         // 内向碎语自动喂念头：X 冒出的心里话 → 关联 attachment 的闪念（strength 0.45）
@@ -716,6 +748,11 @@ ${messagesText}
         // 回复结束后异步触发记忆压缩（不影响已结束的响应）
         compressChatMemoryIfNeeded(chatId).catch(err =>
           console.error('[记忆压缩] 异步执行失败:', err.message)
+        )
+
+        // 回复结束后异步记一轮有效对话，累计到阈值才回看更新自我画像（不影响已结束的响应）
+        recordTurnAndMaybeUpdate(buildRecentConversationText(newMessages, cleanReply)).catch(err =>
+          console.error('[自我画像] 异步执行失败:', err.message)
         )
       } catch (error) {
         console.error('流式对话处理错误:', error)
@@ -821,7 +858,9 @@ ${relevantMemories.map((m, i) => `${i + 1}. ${m.summary || m.content}`).join('\n
           const scheduleContext = buildScheduleContext()
           const shiftContext = buildShiftContext()
           const anniversaryContext = buildAnniversaryContext()
-          const fullSystemPrompt = baseRules ? `${baseRules}\n\n${userSystemPrompt}\n\n${memoryContext}\n\n${scheduleContext}\n\n${shiftContext}\n\n${anniversaryContext}\n\n${timeContext}` : userSystemPrompt
+          // 自我画像层：紧跟 base-rules 之后、其它上下文之前（靠前权重高，稳定生效不被稀释）
+          const selfPortraitContext = buildSelfPortraitContext()
+          const fullSystemPrompt = baseRules ? `${baseRules}\n\n${selfPortraitContext}\n\n${userSystemPrompt}\n\n${memoryContext}\n\n${scheduleContext}\n\n${shiftContext}\n\n${anniversaryContext}\n\n${timeContext}` : userSystemPrompt
 
           // 【关键修复】创建消息副本，不修改原始消息（避免污染数据库）
           const messagesCopy = newMessages
@@ -967,6 +1006,12 @@ ${messagesText}
           // 提取并剥离心语：返回干净正文 + 单独的 heart 字段
           // stripThinkingTags 兜底：清掉正文里可能夹带的 <thinking> 思考链
           const { reply: cleanReply, heart } = extractAndStripHeart(stripThinkingTags(finalReply))
+
+          // 回复结束后异步记一轮有效对话，累计到阈值才回看更新自我画像
+          recordTurnAndMaybeUpdate(buildRecentConversationText(newMessages, cleanReply)).catch(err =>
+            console.error('[自我画像] 异步执行失败:', err.message)
+          )
+
           return sendJson(res, 200, { reply: cleanReply, toolResults: toolResults, heart })
       } catch (error) {
         console.error('对话处理错误:', error)
@@ -1518,6 +1563,36 @@ ${messagesText}
       return sendJson(res, 200, { data: thoughts })
     }
 
+    // ===== 自我画像层 API（面板：可视 + 可控） =====
+    // 列出当前 stable / recent 两组条目 + 元信息（累计轮数 / 连续失败 / 自动开关）
+    if (pathname === '/api/self-portrait' && req.method === 'GET') {
+      return sendJson(res, 200, { data: listPortrait() })
+    }
+
+    // 手动新增一条画像（走同样的 schema + 禁区词校验）
+    if (pathname === '/api/self-portrait' && req.method === 'POST') {
+      const body = await readBody(req)
+      const result = addPortraitItem({ text: body.text, type: body.type })
+      if (!result.ok) return sendJson(res, 400, { error: result.error })
+      return sendJson(res, 200, { data: result.data })
+    }
+
+    // 手动编辑 / 置顶（锁为 stable 永不淘汰）
+    if (pathname.match(/^\/api\/self-portrait\/.+/) && req.method === 'PATCH') {
+      const id = pathname.split('/')[3]
+      const updates = await readBody(req)
+      const result = updatePortraitItem(id, updates)
+      if (!result.ok) return sendJson(res, 400, { error: result.error })
+      return sendJson(res, 200, { data: result.data })
+    }
+
+    // 手动删除
+    if (pathname.match(/^\/api\/self-portrait\/.+/) && req.method === 'DELETE') {
+      const id = pathname.split('/')[3]
+      const result = deletePortraitItem(id)
+      return sendJson(res, 200, { ok: true, removed: result.removed })
+    }
+
     // ===== 数据备份：导出全部本地 JSON =====
     if (pathname === '/api/export' && req.method === 'GET') {
       const keys = listStorageKeys()
@@ -1598,7 +1673,8 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('  GET/POST/PUT/DELETE /api/anniversary  (纪念日/提醒)')
   console.log('  GET/POST /api/shift, GET/PUT /api/shift-types  (排班表)')
   console.log('  GET /api/desire/state, POST /api/desire/feed  (欲望驱动系统)')
-  
+  console.log('  GET/POST/PATCH/DELETE /api/self-portrait  (自我画像层)')
+
   setupDailyDiaryTask()
   setupProactiveTask()
   setupReminderTask()

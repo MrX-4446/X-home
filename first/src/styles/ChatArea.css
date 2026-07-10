@@ -59,6 +59,12 @@
   border-top: 1px dashed var(--border-color);
 }
 
+/* 历史消息里的思考链折叠块：默认折叠，跟随气泡展示，宽度自适应 */
+.reasoning-panel--history {
+  max-width: 100%;
+  margin: 0 0 8px;
+}
+
 /* 停止生成按钮 */
 .stop-generating-row {
   display: flex;

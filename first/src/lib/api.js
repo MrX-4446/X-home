@@ -366,6 +366,7 @@ export async function chatWithAIStream(
   let reply = ''
   let toolResults = []
   let heart = null
+  let reasoning = null
 
   try {
     const resp = await fetch(url, {
@@ -417,13 +418,14 @@ export async function chatWithAIStream(
           reply = evt.reply ?? reply
           toolResults = evt.toolResults || toolResults
           heart = evt.heart ?? heart
+          reasoning = evt.reasoning ?? reasoning
         } else if (evt.type === 'error') {
           throw new Error(evt.error || '流式回复出错')
         }
       }
     }
 
-    return { reply, toolResults, heart }
+    return { reply, toolResults, heart, reasoning }
   } catch (err) {
     // 用户主动终止（AbortError）：把已产出的内容作为正常结果返回，不当作错误
     if (err.name === 'AbortError') {
