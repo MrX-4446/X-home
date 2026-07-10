@@ -22,8 +22,8 @@ function SettingsPanel({ onClose, onSave }) {
     temperature: '0.7',
     max_tokens: '4096',
     top_p: '0.9',
-    memory_threshold: '3000',
-    keep_recent_messages: '10',
+    compress_threshold: '50',
+    keep_recent_messages: '20',
     deep_thinking: false,
     desire_driven_enabled: false,
   })
@@ -234,30 +234,31 @@ function SettingsPanel({ onClose, onSave }) {
 
             <div className="settings-grid">
               <div className="settings-item">
-                <label className="settings-label">Token 阈值</label>
+                <label className="settings-label">压缩触发条数</label>
                 <input
                   type="number"
-                  min="1000"
-                  max="10000"
-                  step="500"
-                  value={settings.memory_threshold}
-                  onChange={e => handleChange('memory_threshold', e.target.value)}
+                  min="10"
+                  max="500"
+                  step="10"
+                  value={settings.compress_threshold}
+                  onChange={e => handleChange('compress_threshold', e.target.value)}
                   className="settings-input"
                 />
-                <p className="settings-hint">超过此值时触发记忆压缩</p>
+                <p className="settings-hint">对话消息累计超过此条数时触发压缩（一问一答算 2 条）</p>
               </div>
 
               <div className="settings-item">
-                <label className="settings-label">保留消息轮数</label>
+                <label className="settings-label">压缩后保留条数</label>
                 <input
                   type="number"
-                  min="1"
-                  max="50"
+                  min="2"
+                  max="200"
+                  step="2"
                   value={settings.keep_recent_messages}
                   onChange={e => handleChange('keep_recent_messages', e.target.value)}
                   className="settings-input"
                 />
-                <p className="settings-hint">压缩后保留最近多少轮对话</p>
+                <p className="settings-hint">压缩后保留最近多少条消息原文（需小于触发条数）</p>
               </div>
             </div>
           </div>

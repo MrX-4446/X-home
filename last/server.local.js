@@ -380,12 +380,15 @@ async function compressChatMemoryIfNeeded(chatId) {
 
   const allMessages = chat.messages
   const messageCount = allMessages.length
-  const keepRecent = parseInt(getSetting('keep_recent_messages') || '30')
-  const compressThreshold = keepRecent * 2
+  const keepRecent = parseInt(getSetting('keep_recent_messages') || '20')
+  // 压缩触发条数（消息条数，非轮次）：对话消息超过此值就压缩
+  let compressThreshold = parseInt(getSetting('compress_threshold') || '50')
+  // 保护：触发条数必须大于保留条数，否则压完立刻又触发；兜底为 keepRecent+2
+  if (compressThreshold <= keepRecent) compressThreshold = keepRecent + 2
 
   if (messageCount <= compressThreshold) return
 
-  console.log(`[记忆压缩] 对话已达 ${messageCount} 轮，开始压缩记忆...`)
+  console.log(`[记忆压缩] 对话已达 ${messageCount} 条消息（阈值 ${compressThreshold}），开始压缩记忆...`)
   const compressCount = messageCount - keepRecent
   const messagesToCompress = allMessages.slice(0, compressCount)
   const remainingMessages = allMessages.slice(compressCount)
@@ -518,7 +521,7 @@ const server = http.createServer(async (req, res) => {
             return sendJson(res, 200, { ok: true, message: '没有需要压缩的消息' })
           }
 
-          const keepRecent = parseInt(getSetting('keep_recent_messages') || '30')
+          const keepRecent = parseInt(getSetting('keep_recent_messages') || '20')
           const forceCompressAll = body.force || false
           
           let messagesToCompress, remainingMessages
@@ -643,8 +646,8 @@ ${messagesText}
         temperature: savedSettings.temperature || '0.7',
         max_tokens: savedSettings.max_tokens || '4096',
         top_p: savedSettings.top_p || '0.9',
-        memory_threshold: savedSettings.memory_threshold || '3000',
-        keep_recent_messages: savedSettings.keep_recent_messages || '30',
+        compress_threshold: savedSettings.compress_threshold || '50',
+        keep_recent_messages: savedSettings.keep_recent_messages || '20',
         deep_thinking: savedSettings.deep_thinking || false,
         desire_driven_enabled: savedSettings.desire_driven_enabled || false,
       }
@@ -923,13 +926,16 @@ ${fullSystemPrompt}
             const allMessages = chat.messages
             const messageCount = allMessages.length
             
-            const keepRecent = parseInt(getSetting('keep_recent_messages') || '30')
-            const compressThreshold = keepRecent * 2
+            const keepRecent = parseInt(getSetting('keep_recent_messages') || '20')
+            // 压缩触发条数（消息条数，非轮次）：对话消息超过此值就压缩
+            let compressThreshold = parseInt(getSetting('compress_threshold') || '50')
+            // 保护：触发条数必须大于保留条数，否则压完立刻又触发；兜底为 keepRecent+2
+            if (compressThreshold <= keepRecent) compressThreshold = keepRecent + 2
             
             // 消息数超过阈值就压缩（注意：这里是用户消息刚保存、AI 回复前的时刻，
             // 消息数是奇数，所以用 > 而不是 >= % 判断更可靠）
             if (messageCount > compressThreshold) {
-              console.log(`[记忆压缩] 对话已达 ${messageCount} 轮，开始压缩记忆...`)
+              console.log(`[记忆压缩] 对话已达 ${messageCount} 条消息（阈值 ${compressThreshold}），开始压缩记忆...`)
               
               // 取最早的消息进行压缩，保留最近 5 条
               const compressCount = messageCount - keepRecent

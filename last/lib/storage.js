@@ -108,8 +108,8 @@ function getSetting(key) {
     temperature: '0.7',
     max_tokens: '4096',
     top_p: '0.9',
-    memory_threshold: '3000',
-    keep_recent_messages: '30',
+    compress_threshold: '50',
+    keep_recent_messages: '20',
     memory_decay_rate: '0.01',
     // 人设默认走 base-rules.md，此处留空；用户在设置页填了才作为额外设定追加
     system_prompt: '',
