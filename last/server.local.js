@@ -107,13 +107,20 @@ function generateMessageId(baseTime, index) {
 // 内心独白（心语）标记：AI 在回复末尾埋 [HEART:内心独白]。
 // 从正文中提取独白内容、并把标记从正文里剥离，避免 [HEART:...] 混进
 // 消息历史/记忆压缩（污染后续 prompt），返回 { reply: 干净正文, heart: 独白或 null }。
-const HEART_MARKER_REGEX = /\[HEART:([\s\S]*?)\]/
+// 兼容模型可能输出的全角括号/冒号（如 ［HEART：］【HEART：】），并兜底无括号写法。
+const HEART_MARKER_REGEX = /[[［【]\s*HEART\s*[:：]\s*([\s\S]*?)\s*[\]］】]/i
+const HEART_MARKER_BARE_REGEX = /HEART\s*[:：]\s*([^\n]+?)\s*$/im
 function extractAndStripHeart(rawReply) {
   if (!rawReply) return { reply: rawReply || '', heart: null }
-  const match = rawReply.match(HEART_MARKER_REGEX)
+  let regex = HEART_MARKER_REGEX
+  let match = rawReply.match(regex)
+  if (!match) {
+    regex = HEART_MARKER_BARE_REGEX
+    match = rawReply.match(regex)
+  }
   if (!match) return { reply: rawReply, heart: null }
   const heart = (match[1] || '').trim()
-  const reply = rawReply.replace(HEART_MARKER_REGEX, '').replace(/\n{3,}/g, '\n\n').trim()
+  const reply = rawReply.replace(regex, '').replace(/\n{3,}/g, '\n\n').trim()
   return { reply, heart: heart || null }
 }
 

@@ -195,8 +195,8 @@ function ChatArea({
           <div className="message assistant">
             <div className="message-avatar">{chat?.chatAvatar || '智'}</div>
             <div className="message-body">
-              {/* 流式期间隐藏未闭合的 [HEART: 片段，避免半截标记闪烁；done 后由 Message 正式渲染 */}
-              <div className="message-content">{streamingText.replace(/\[HEART:[\s\S]*$/, '').trimEnd()}</div>
+              {/* 流式期间隐藏未闭合的 HEART 片段（兼容全角括号/冒号），避免半截标记闪烁；done 后由 Message 正式渲染 */}
+              <div className="message-content">{streamingText.replace(/[[［【]?\s*HEART\s*[:：][\s\S]*$/i, '').trimEnd()}</div>
             </div>
           </div>
         )}

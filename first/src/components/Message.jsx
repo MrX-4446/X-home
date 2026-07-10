@@ -1,15 +1,21 @@
 // 内心独白（心语）标记：AI 在回复里埋 [HEART:内心独白]，前端解析后剥离正文、单独渲染
-// 用 [\s\S] 兼容独白里可能出现的换行；非贪婪匹配到第一个 ] 为止
-const HEART_REGEX = /\[HEART:([\s\S]*?)\]/
+// 兼容模型可能输出的全角括号/冒号（如 ［HEART：］【HEART：】），并兜底无括号写法
+const HEART_REGEX_BRACKET = /[[［【]\s*HEART\s*[:：]\s*([\s\S]*?)\s*[\]］】]/i
+const HEART_REGEX_BARE = /HEART\s*[:：]\s*([^\n]+?)\s*$/im
 
 // 从正文中提取并剥离心语标记，返回 { text: 去掉标记的正文, heart: 独白内容(无则 null) }
 function extractHeart(rawText) {
   if (!rawText) return { text: rawText || '', heart: null }
-  const match = rawText.match(HEART_REGEX)
+  let regex = HEART_REGEX_BRACKET
+  let match = rawText.match(regex)
+  if (!match) {
+    regex = HEART_REGEX_BARE
+    match = rawText.match(regex)
+  }
   if (!match) return { text: rawText, heart: null }
   const heart = (match[1] || '').trim()
   // 剥离标记本身，并清理其残留的多余空行
-  const text = rawText.replace(HEART_REGEX, '').replace(/\n{3,}/g, '\n\n').trim()
+  const text = rawText.replace(regex, '').replace(/\n{3,}/g, '\n\n').trim()
   return { text, heart: heart || null }
 }
 
