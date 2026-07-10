@@ -286,18 +286,48 @@ function App() {
     return date.toLocaleDateString('zh-CN')
   }
 
-  // 发送核心逻辑：接受纯文本参数，供输入框发送与共读伴侣等场景直接调用，
+  // 把消息 content 归一成纯文本：字符串原样；多模态数组取 text 段、图片→「[图片]」占位。
+  // 用于把历史消息（可能含图片数组）降级成文字再发给 AI，省带宽并避开图片数量上限。
+  const contentToPlainText = (content) => {
+    if (typeof content === 'string') return content
+    if (Array.isArray(content)) {
+      return content
+        .map(part => {
+          if (typeof part === 'string') return part
+          if (part?.type === 'text') return part.text || ''
+          if (part?.type === 'image_url') return '[图片]'
+          return ''
+        })
+        .join(' ')
+        .trim()
+    }
+    return content == null ? '' : String(content)
+  }
+
+  // 发送核心逻辑：接受纯文本 + 可选图片（base64 data URL 数组），供输入框发送与共读伴侣等场景直接调用，
   // 不再依赖 DOM 时序或模拟按键。
-  const sendText = async (rawText) => {
+  const sendText = async (rawText, images = []) => {
     const userText = (rawText || '').trim()
-    if (!userText || isTyping) return
+    const hasImages = Array.isArray(images) && images.length > 0
+    if ((!userText && !hasImages) || isTyping) return
+
+    // 带图时用多模态数组作为 content（文字段可选 + 每张图一个 image_url 段），否则用纯字符串。
+    // 这一份 userContent 会贯穿：存库、渲染、发给 AI。
+    const userContent = hasImages
+      ? [
+          ...(userText ? [{ type: 'text', text: userText }] : []),
+          ...images.map(url => ({ type: 'image_url', image_url: { url } })),
+        ]
+      : userText
+    // 会话列表预览文案：纯图片消息用「[图片]」占位
+    const previewText = userText || '[图片]'
 
     // 如果没有当前聊天，先创建一个
     let chatId = currentChatId
     if (!chatId) {
       const newChat = await createChatDB({
         title: '新对话',
-        preview: userText.substring(0, 30),
+        preview: previewText.substring(0, 30),
         chat_name: '智语助手',
         chat_avatar: 'X'
       })
@@ -313,7 +343,7 @@ function App() {
     const newMessage = {
       chat_id: chatId,
       role: 'user',
-      content: userText,
+      content: userContent,
     }
 
     // 1) 保存用户消息到数据库（通过后端 API）
@@ -329,10 +359,11 @@ function App() {
 
       // 2) 组装多轮对话上下文：历史消息 + 本轮用户输入
       //    仅保留最近 20 条，避免 prompt 过长造成 token 浪费
+      //    历史消息里的图片降级成「[图片]」文字（只把本轮的图真正发给模型），省带宽
       const history = (currentChat?.messages || [])
-        .map((m) => ({ role: m.role, content: m.content }))
+        .map((m) => ({ role: m.role, content: contentToPlainText(m.content) }))
         .slice(-20)
-      const messagesForAI = [...history, { role: 'user', content: userText }]
+      const messagesForAI = [...history, { role: 'user', content: userContent }]
 
       // 3) 调用后端 AI 流式接口，边接收边展示打字机效果
       setStreamingText('')
@@ -378,7 +409,7 @@ function App() {
         })
 
         await updateChatDB(chatId, {
-          preview: userText.substring(0, 30) + (userText.length > 30 ? '...' : ''),
+          preview: previewText.substring(0, 30) + (previewText.length > 30 ? '...' : ''),
         })
       }
       await loadMessages(chatId)
@@ -403,12 +434,13 @@ function App() {
     }
   }
 
-  // 输入框发送：读取当前输入并清空，交给 sendText 处理
-  const handleSend = () => {
+  // 输入框发送：读取当前输入并清空，连同图片交给 sendText 处理
+  const handleSend = (images = []) => {
     const text = inputValue.trim()
-    if (!text || isTyping) return
+    const hasImages = Array.isArray(images) && images.length > 0
+    if ((!text && !hasImages) || isTyping) return
     setInputValue('')
-    sendText(text)
+    sendText(text, images)
   }
 
   const handleKeyPress = (e) => {

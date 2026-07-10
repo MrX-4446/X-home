@@ -105,8 +105,40 @@ function MessageAvatar({ role, chatAvatar, userAvatar, hasHeart }) {
   )
 }
 
+// 多模态消息内容（用户发的带图消息）：content 是数组，分离渲染文字段与图片段。
+// 用户消息不含 HEART / TOOL_RESULTS 标记，故不走 parseMessageContent。
+function MultimodalContent({ content }) {
+  const parts = Array.isArray(content) ? content : []
+  const textParts = parts.filter(p => p?.type === 'text' && p.text)
+  const imageParts = parts.filter(p => p?.type === 'image_url' && p.image_url?.url)
+  return (
+    <>
+      {textParts.length > 0 && (
+        <div className="message-content">{textParts.map(p => p.text).join('\n')}</div>
+      )}
+      {imageParts.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: textParts.length > 0 ? 6 : 0 }}>
+          {imageParts.map((p, index) => (
+            <img
+              key={index}
+              src={p.image_url.url}
+              alt={`图片${index + 1}`}
+              style={{ maxWidth: 160, maxHeight: 160, borderRadius: 8, objectFit: 'cover', cursor: 'pointer' }}
+              onClick={() => window.open(p.image_url.url, '_blank')}
+            />
+          ))}
+        </div>
+      )}
+    </>
+  )
+}
+
 function Message({ message, status, chatAvatar, userAvatar }) {
-  const parsed = parseMessageContent(message.content)
+  // 多模态消息（数组 content）单独渲染；字符串消息走原有的心语/工具结果解析
+  const isMultimodal = Array.isArray(message.content)
+  const parsed = isMultimodal
+    ? { text: '', toolResults: [], heart: null }
+    : parseMessageContent(message.content)
   const { text, toolResults } = parsed
   // 优先用存储的 heart 字段（后端已从正文剥离）；老消息/兜底再取正文里解析到的
   const heart = message.heart ?? parsed.heart
@@ -118,7 +150,11 @@ function Message({ message, status, chatAvatar, userAvatar }) {
       <MessageAvatar role={message.role} chatAvatar={chatAvatar} userAvatar={userAvatar} hasHeart={!!heart} />
       <div className="message-body">
         {reasoning && <ReasoningBlock reasoning={reasoning} />}
-        <div className="message-content">{text}</div>
+        {isMultimodal ? (
+          <MultimodalContent content={message.content} />
+        ) : (
+          <div className="message-content">{text}</div>
+        )}
         {heart && (
           <div className="message-heart">
             <span className="heart-icon">💭</span>

@@ -33,21 +33,14 @@ const defaultAIProviders = [
 // ---------- AI 连接测试 ----------
 async function testAIProvider(provider) {
   try {
-    // 优先使用环境变量中的 API Key（服务器部署推荐）
-    let apiKey = process.env.ARK_API_KEY || ''
-
-    // 如果环境变量没有，尝试使用 provider 中存储的 API Key
-    if (!apiKey) {
-      apiKey = provider.api_key || provider.apiKey || ''
-    }
-
-    // Mock 模式：使用明文存储的 API Key
-    if (!apiKey && provider._apiKeyPlain) {
-      apiKey = provider._apiKeyPlain
-    }
+    // 优先使用该 provider 自己存储的 API Key（支持不同厂商混用），
+    // env 里的 ARK_API_KEY 仅作兜底。
+    let apiKey = provider._apiKeyPlain || provider.api_key || provider.apiKey || ''
+    if (apiKey === '******') apiKey = ''
+    if (!apiKey) apiKey = process.env.ARK_API_KEY || ''
 
     if (!apiKey || apiKey === 'your-ark-api-key') {
-      return { ok: false, error: '未配置有效的 API Key，请在 .env 中设置 ARK_API_KEY' }
+      return { ok: false, error: '未配置有效的 API Key：请在该 AI 接入里填写 Key，或在 .env 设置 ARK_API_KEY 作为兜底' }
     }
 
     console.log('[AI测试] 使用 API Key:', apiKey.substring(0, 8) + '...')
@@ -137,13 +130,14 @@ function resolveProviderAndKey(provider, useHelperAI) {
     throw new Error('没有可用的 AI 提供商')
   }
 
-  // 获取 API Key
-  let apiKey = process.env.ARK_API_KEY || ''
-  if (!apiKey && aiProvider._apiKeyPlain) {
-    apiKey = aiProvider._apiKeyPlain
-  }
+  // 获取 API Key：优先用该 provider 自己存储的 key（支持不同厂商混用，如阿里云 + 火山），
+  // env 里的 ARK_API_KEY 仅作兜底——只在该 provider 未单独配 key 时使用。
+  let apiKey = ''
+  const ownKey = aiProvider._apiKeyPlain || aiProvider.api_key || aiProvider.apiKey || ''
+  if (ownKey && ownKey !== '******') apiKey = ownKey
+  if (!apiKey) apiKey = process.env.ARK_API_KEY || ''
   if (!apiKey) {
-    throw new Error('未配置有效的 API Key，请在 .env 中设置 ARK_API_KEY')
+    throw new Error(`未配置有效的 API Key：请在「${aiProvider.name || aiProvider.id}」接入里填写 Key，或在 .env 设置 ARK_API_KEY 作为兜底`)
   }
 
   return { aiProvider, apiKey }

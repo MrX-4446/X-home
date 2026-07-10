@@ -259,6 +259,30 @@ const BUILTIN_TOOLS = [
 
 // ========== 聊天共享逻辑（普通 / 流式 复用） ==========
 
+// 把消息 content 归一成纯文本：字符串原样返回；多模态数组取其中 text 段，
+// 图片段用「[图片]」占位。用于记忆检索/压缩/画像等只吃文字的环节，避免数组变成 [object Object]。
+function messageContentToText(content) {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content.map(part => {
+      if (typeof part === 'string') return part
+      if (part?.type === 'text') return part.text || ''
+      if (part?.type === 'image_url') return '[图片]'
+      return ''
+    }).join(' ').trim()
+  }
+  return content == null ? '' : String(content)
+}
+
+// 对外返回 AI 接入配置前，剔除明文 API Key（_apiKeyPlain），避免明文密钥经网络泄漏到前端。
+// 保留 apiKey:'******' 占位与 hasApiKey 标记，前端据此判断“是否已配 Key”即可；
+// 真正调用时的 Key 由后端从本地存储读取，不依赖此响应。
+function sanitizeAIProvider(provider) {
+  if (!provider || typeof provider !== 'object') return provider
+  const { _apiKeyPlain, ...safe } = provider
+  return safe
+}
+
 // 构建发送给 AI 的消息副本：加载并浮现相关记忆 + 时间上下文 + 人设指令。
 // 返回 { messagesCopy }。同时异步更新被检索到的记忆激活次数（不阻塞回复）。
 async function prepareChatMessages(chatId, newMessages) {
@@ -271,11 +295,11 @@ async function prepareChatMessages(chatId, newMessages) {
 
   const userSystemPrompt = getSetting('system_prompt') || ''
 
-  // 获取最后一条用户消息内容，用于语义相关性过滤
+  // 获取最后一条用户消息内容，用于语义相关性过滤（多模态数组取其文字部分）
   let lastUserMessage = ''
   for (let i = newMessages.length - 1; i >= 0; i--) {
     if (newMessages[i].role === 'user') {
-      lastUserMessage = newMessages[i].content || ''
+      lastUserMessage = messageContentToText(newMessages[i].content)
       break
     }
   }
@@ -347,15 +371,32 @@ ${relevantMemories.map((m, i) => `${i + 1}. ${m.summary || m.content}`).join('\n
     .filter(m => m.role !== 'system')
     .map(m => ({ ...m }))
 
-  // 在最后一条用户消息前加入人设指令（AI 最关注最后一条）
+  // 找到最后一条用户消息的位置
+  let lastUserIdx = -1
   for (let i = messagesCopy.length - 1; i >= 0; i--) {
-    if (messagesCopy[i].role === 'user') {
-      const systemInstruction = `【重要！必须严格遵守以下设定】
+    if (messagesCopy[i].role === 'user') { lastUserIdx = i; break }
+  }
+
+  // 历史图片降级：只把「当前这条」用户消息的图片真正发给模型，
+  // 其余历史消息里的多模态图片压成文字占位，省 token/带宽，也避开多模态模型的图片数量上限。
+  messagesCopy.forEach((m, idx) => {
+    if (idx !== lastUserIdx && Array.isArray(m.content)) {
+      m.content = messageContentToText(m.content)
+    }
+  })
+
+  // 在最后一条用户消息前加入人设指令（AI 最关注最后一条）
+  if (lastUserIdx !== -1) {
+    const systemInstruction = `【重要！必须严格遵守以下设定】
 ${fullSystemPrompt}
 
 【用户消息】请严格按照以上设定回复：`
-      messagesCopy[i].content = systemInstruction + messagesCopy[i].content
-      break
+    const c = messagesCopy[lastUserIdx].content
+    if (Array.isArray(c)) {
+      // 多模态消息：把人设指令作为独立 text 段插到最前，保留后面的图片段
+      messagesCopy[lastUserIdx].content = [{ type: 'text', text: systemInstruction }, ...c]
+    } else {
+      messagesCopy[lastUserIdx].content = systemInstruction + (c || '')
     }
   }
 
@@ -367,7 +408,7 @@ ${fullSystemPrompt}
 function buildRecentConversationText(newMessages, latestReply) {
   const msgs = (Array.isArray(newMessages) ? newMessages : []).filter(m => m.role !== 'system')
   const recent = msgs.slice(-8) // 最近 8 条上下文
-  const lines = recent.map(m => `${m.role === 'user' ? '轩' : 'X'}: ${m.content || ''}`)
+  const lines = recent.map(m => `${m.role === 'user' ? '轩' : 'X'}: ${messageContentToText(m.content)}`)
   if (latestReply && latestReply.trim()) lines.push(`X: ${latestReply.trim()}`)
   return lines.join('\n')
 }
@@ -395,7 +436,7 @@ async function compressChatMemoryIfNeeded(chatId) {
   if (messagesToCompress.length === 0) return
 
   const messagesText = messagesToCompress.map(msg =>
-    `${msg.role === 'user' ? '用户' : 'X'}: ${msg.content}`
+    `${msg.role === 'user' ? '用户' : 'X'}: ${messageContentToText(msg.content)}`
   ).join('\n\n')
 
   const compressPrompt = `请将以下对话内容压缩成一段摘要，以恋人 X 的视角，保留三类信息：
@@ -1054,7 +1095,7 @@ ${messagesText}
 
     // ===== AI 接入配置 API =====
     if (pathname === '/api/ai-providers' && req.method === 'GET') {
-      return sendJson(res, 200, { data: mockAIProviders })
+      return sendJson(res, 200, { data: mockAIProviders.map(sanitizeAIProvider) })
     }
 
     if (pathname === '/api/ai-providers' && req.method === 'POST') {
@@ -1071,10 +1112,11 @@ ${messagesText}
         hasApiKey: Boolean(body.apiKey),
         apiKey: '******',
         _apiKeyPlain: body.apiKey || '',
+        supportsVision: body.supportsVision === true,
       }
       mockAIProviders.unshift(newProvider)
       writeStorage('ai-providers', mockAIProviders)
-      return sendJson(res, 200, { data: newProvider })
+      return sendJson(res, 200, { data: sanitizeAIProvider(newProvider) })
     }
 
     if (pathname.match(/\/api\/ai-providers\/(.+)\/test/) && req.method === 'POST') {
@@ -1095,7 +1137,7 @@ ${messagesText}
       const provider = mockAIProviders.find(p => p.id === id)
       if (provider) Object.assign(provider, updates, { updated_at: new Date().toISOString() })
       writeStorage('ai-providers', mockAIProviders)
-      return sendJson(res, 200, { data: provider })
+      return sendJson(res, 200, { data: sanitizeAIProvider(provider) })
     }
 
     if (pathname.match(/\/api\/ai-providers\/.+/) && req.method === 'DELETE') {

@@ -32,6 +32,7 @@ function AIConfigPanel({ onClose, aiList, onSave }) {
     endpoint: '',
     model: '',
     providerType: 'openai_compatible',
+    supportsVision: false,
   })
 
   // 当选择服务商时自动填充端点
@@ -82,7 +83,7 @@ function AIConfigPanel({ onClose, aiList, onSave }) {
         const nextProviders = [created, ...providers]
         syncProviders(nextProviders)
         setSelectedProvider('')
-        setNewAI({ name: '', apiKey: '', endpoint: '', model: '', providerType: 'openai_compatible' })
+        setNewAI({ name: '', apiKey: '', endpoint: '', model: '', providerType: 'openai_compatible', supportsVision: false })
         setShowAddForm(false)
         setStatusMessage('AI 接入已添加')
       }
@@ -97,6 +98,19 @@ function AIConfigPanel({ onClose, aiList, onSave }) {
 
     try {
       const updated = await updateAIProvider(id, { enabled: !current.enabled })
+      syncProviders(providers.map(ai => ai.id === id ? updated : ai))
+    } catch (err) {
+      setStatusMessage(err.message)
+    }
+  }
+
+  // 切换该 AI 是否支持图片输入（多模态）。只有开启的 AI 被选中时，聊天输入框才允许发图。
+  const toggleVision = async (id) => {
+    const current = providers.find(ai => ai.id === id)
+    if (!current) return
+
+    try {
+      const updated = await updateAIProvider(id, { supportsVision: !current.supportsVision })
       syncProviders(providers.map(ai => ai.id === id ? updated : ai))
     } catch (err) {
       setStatusMessage(err.message)
@@ -182,6 +196,13 @@ function AIConfigPanel({ onClose, aiList, onSave }) {
                     <div className="ai-info">
                       <div className="ai-name">{ai.name}</div>
                       <div className="ai-endpoint">{ai.model} · {ai.endpoint}</div>
+                      <button
+                        className={`ai-vision-toggle ${ai.supportsVision ? 'on' : ''}`}
+                        title="是否为多模态模型：开启后，选中该 AI 时聊天框可发图片"
+                        onClick={(e) => { e.stopPropagation(); toggleVision(ai.id); }}
+                      >
+                        {ai.supportsVision ? '🖼 支持图片' : '仅文字（点此开启图片）'}
+                      </button>
                     </div>
                   </div>
                   <div className="ai-item-actions">
@@ -262,11 +283,22 @@ function AIConfigPanel({ onClose, aiList, onSave }) {
                     placeholder="选择服务商后自动填充，也可手动修改"
                   />
                 </div>
+                <div className="ai-form-item">
+                  <label className="ai-form-label" style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={newAI.supportsVision}
+                      onChange={e => setNewAI({ ...newAI, supportsVision: e.target.checked })}
+                      style={{ marginRight: 6 }}
+                    />
+                    支持图片输入（多模态模型，如通义 qwen-vl）
+                  </label>
+                </div>
                 <div className="ai-form-actions">
                   <button className="ai-form-btn ai-form-btn-secondary" onClick={() => {
                     setShowAddForm(false)
                     setSelectedProvider('')
-                    setNewAI({ name: '', apiKey: '', endpoint: '', model: '', providerType: 'openai_compatible' })
+                    setNewAI({ name: '', apiKey: '', endpoint: '', model: '', providerType: 'openai_compatible', supportsVision: false })
                   }}>
                     取消
                   </button>
