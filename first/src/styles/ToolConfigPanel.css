@@ -134,6 +134,24 @@
   background-color: var(--primary-warm-gray-blue-dark);
 }
 
+/* 塔罗牌阵管理面板 */
+.tarot-spread-hint {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background-color: var(--background-card);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.tarot-spread-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .add-tool-panel {
   margin-bottom: 16px;
   padding: 16px;

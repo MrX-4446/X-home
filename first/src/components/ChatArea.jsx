@@ -149,7 +149,7 @@ function ChatArea({
           onOpenSidebar={onOpenSidebar} 
           onGoHome={onGoHome} 
           chatName={settings.chat_name || chat?.chatName || '智语助手'} 
-          chatAvatar={chat?.chatAvatar || '智'}
+          chatAvatar={chat?.chatAvatar || 'X'}
           chatTitle={chat?.title || ''}
           onOpenSettings={onOpenSettings}
         />
@@ -170,7 +170,7 @@ function ChatArea({
               key={message.id}
               message={message}
               status={getMessageStatus(message, index, chat.messages)}
-              chatAvatar={chat?.chatAvatar || '智'}
+              chatAvatar={chat?.chatAvatar || 'X'}
               userAvatar={settings.user_avatar || '轩'}
             />
           ))
@@ -193,7 +193,7 @@ function ChatArea({
         {/* 流式回复气泡：AI 正在生成、尚未写库时实时展示 */}
         {streamingText && (
           <div className="message assistant">
-            <div className="message-avatar">{chat?.chatAvatar || '智'}</div>
+            <div className="message-avatar">{chat?.chatAvatar || 'X'}</div>
             <div className="message-body">
               {/* 流式期间隐藏未闭合的 HEART 片段（兼容全角括号/冒号），避免半截标记闪烁；done 后由 Message 正式渲染 */}
               <div className="message-content">{streamingText.replace(/[[［【]?\s*HEART\s*[:：][\s\S]*$/i, '').trimEnd()}</div>

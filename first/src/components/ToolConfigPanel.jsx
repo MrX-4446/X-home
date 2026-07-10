@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import CustomSelect from './CustomSelect'
+import TarotSpreadPanel from './TarotSpreadPanel'
 
 const BackIcon = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -111,6 +112,14 @@ const CodeIcon = () => (
   </svg>
 )
 
+const MysticIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"></path>
+    <path d="M19 3v4"></path>
+    <path d="M21 5h-4"></path>
+  </svg>
+)
+
 const iconMap = {
   '搜索': SearchIcon,
   '计算器': CalculatorIcon,
@@ -124,6 +133,7 @@ const iconMap = {
   '技能': BookIcon,
   '手机App': PhoneIcon,
   '代码': CodeIcon,
+  '玄学': MysticIcon,
 }
 
 // Mock 工具列表数据
@@ -207,6 +217,7 @@ function ToolConfigPanel({ onClose, tools: initialTools, onSave }) {
   const [selectedCategory, setSelectedCategory] = useState('全部')
   const [saveMessage, setSaveMessage] = useState('')
   const [showAddPanel, setShowAddPanel] = useState(false)
+  const [showSpreadPanel, setShowSpreadPanel] = useState(false)
   const [newTool, setNewTool] = useState({
     name: '',
     description: '',
@@ -309,6 +320,7 @@ function ToolConfigPanel({ onClose, tools: initialTools, onSave }) {
 
   return (
     <>
+      {showSpreadPanel && <TarotSpreadPanel onClose={() => setShowSpreadPanel(false)} />}
       <div className="fullscreen-overlay"></div>
       <div className="fullscreen-panel">
         <div className="panel-header">
@@ -318,6 +330,9 @@ function ToolConfigPanel({ onClose, tools: initialTools, onSave }) {
           <h1 className="panel-title">工具配置</h1>
           <div className="tool-header-actions">
             <span className="panel-subtitle">已启用 {enabledCount}/{tools.length} 个工具</span>
+            <button className="add-tool-btn" onClick={() => setShowSpreadPanel(true)}>
+              管理塔罗牌阵
+            </button>
             <button className="add-tool-btn" onClick={() => setShowAddPanel(true)}>
               <PlusIcon />
               增添工具

@@ -100,6 +100,14 @@ const {
 // 极光推送（设备 token 注册 + REST 单推）
 const { registerToken: registerPushToken, isConfigured: isPushConfigured } = require('./lib/push')
 
+// 欲望驱动系统（驱动条 / 念头池 / 心跳推进 / gating 开关）
+const {
+  getDesireState,
+  feed: feedDesireThought,
+} = require('./lib/desire/state')
+const { DRIVE_KEYS: DESIRE_DRIVE_KEYS } = require('./lib/desire/desire')
+const { setupDesireTask } = require('./lib/desire/heartbeat')
+
 function generateMessageId(baseTime, index) {
   return `msg-${baseTime}-${index}-${Math.random().toString(36).slice(2, 8)}`
 }
@@ -187,7 +195,30 @@ const mockTools = readStorage('tools') || [
   { id: 'tool-13', name: '日程查询', description: '查询轩记录的日程安排（今天/明天/本周等）', iconKey: '日历', enabled: true, category: '生活', type: 'tool' },
   { id: 'tool-14', name: '排班查询', description: '查询轩的排班表（早班/夜班/休息/调休等）', iconKey: '日历', enabled: true, category: '生活', type: 'tool' },
   { id: 'tool-12', name: '打开网页', description: '读取指定网址的正文内容（用于打开用户发来的链接）', iconKey: '搜索', enabled: true, category: '搜索', type: 'cloud' },
+  { id: 'tool-15', name: '塔罗占卜', description: '塔罗牌占卜，AI 根据问题自选牌阵，牌义由 X 解读', iconKey: '玄学', enabled: false, category: '玄学', type: 'tool' },
+  { id: 'tool-16', name: '今日运势', description: '查询星座今日运势（仅在主动问时）', iconKey: '玄学', enabled: false, category: '玄学', type: 'tool' },
+  { id: 'tool-17', name: '周公解梦', description: '梦境关键词传统解梦 + X 解读', iconKey: '玄学', enabled: false, category: '玄学', type: 'tool' },
+  { id: 'tool-18', name: '小六壬', description: '小六壬掐指起课，快速占问一事吉凶', iconKey: '玄学', enabled: false, category: '玄学', type: 'tool' },
 ]
+
+// 内置工具补丁：老用户的 tools 已持久化在库里，新增的内置工具（如玄学工具）
+// 需按 id 补进去，否则不会出现在工具列表里。只补缺失项，不覆盖用户已改的启用状态。
+const BUILTIN_TOOLS = [
+  { id: 'tool-15', name: '塔罗占卜', description: '塔罗牌占卜，AI 根据问题自选牌阵，牌义由 X 解读', iconKey: '玄学', enabled: false, category: '玄学', type: 'tool' },
+  { id: 'tool-16', name: '今日运势', description: '查询星座今日运势（仅在主动问时）', iconKey: '玄学', enabled: false, category: '玄学', type: 'tool' },
+  { id: 'tool-17', name: '周公解梦', description: '梦境关键词传统解梦 + X 解读', iconKey: '玄学', enabled: false, category: '玄学', type: 'tool' },
+  { id: 'tool-18', name: '小六壬', description: '小六壬掐指起课，快速占问一事吉凶', iconKey: '玄学', enabled: false, category: '玄学', type: 'tool' },
+]
+;(function ensureBuiltinTools() {
+  let changed = false
+  for (const t of BUILTIN_TOOLS) {
+    if (!mockTools.some(existing => existing.id === t.id)) {
+      mockTools.push({ ...t })
+      changed = true
+    }
+  }
+  if (changed) writeStorage('tools', mockTools)
+})()
 
 // HTTP 响应辅助函数（sendJson / readBody / CORS_HEADERS）已移至 lib/storage.js
 
@@ -588,6 +619,7 @@ ${messagesText}
         memory_threshold: savedSettings.memory_threshold || '3000',
         keep_recent_messages: savedSettings.keep_recent_messages || '30',
         deep_thinking: savedSettings.deep_thinking || false,
+        desire_driven_enabled: savedSettings.desire_driven_enabled || false,
       }
       return sendJson(res, 200, { data: settings })
     }
@@ -668,6 +700,16 @@ ${messagesText}
         const { reply: cleanReply, heart } = extractAndStripHeart(finalReply)
         sse({ type: 'done', reply: cleanReply, toolResults, heart })
         res.end()
+
+        // 内向碎语自动喂念头：X 冒出的心里话 → 关联 attachment 的闪念（strength 0.45）
+        // heart 只作数据被读成关键词/强度，绝不拼回 prompt。
+        if (heart) {
+          try {
+            feedDesireThought({ text: heart.slice(0, 120), drive: 'attachment', kind: 'flit', strength: 0.45 })
+          } catch (e) {
+            console.warn('[欲望驱动] 心语喂念头失败:', e.message)
+          }
+        }
 
         // 回复结束后异步触发记忆压缩（不影响已结束的响应）
         compressChatMemoryIfNeeded(chatId).catch(err =>
@@ -1181,6 +1223,16 @@ ${messagesText}
         notes.unshift(newNote)
       }
       writeStorage('reading-notes', notes)
+      // 外部素材自动喂念头：读到/记下的书摘 → 关联 reflection 维度的闪念（strength 0.5）
+      // text 只作数据被读成关键词/强度，绝不拼进 prompt。
+      try {
+        const noteText = (newNote.excerpt || newNote.content || newNote.text || '').toString().trim()
+        if (noteText) {
+          feedDesireThought({ text: noteText.slice(0, 120), drive: 'reflection', kind: 'flit', strength: 0.5 })
+        }
+      } catch (e) {
+        console.warn('[欲望驱动] 书摘喂念头失败:', e.message)
+      }
       return sendJson(res, 200, { data: newNote })
     }
 
@@ -1289,6 +1341,26 @@ ${messagesText}
       if (index !== -1) mockTools.splice(index, 1)
       writeStorage('tools', mockTools)
       return sendJson(res, 200, { ok: true })
+    }
+
+    // ===== 塔罗牌阵库 API =====
+    // 读：无自定义时返回默认牌阵库；写：整体覆盖保存（前端「牌阵管理」面板用）
+    if (pathname === '/api/tarot/spreads' && req.method === 'GET') {
+      const { DEFAULT_SPREADS } = require('./lib/divination')
+      const saved = readStorage('tarot_spreads')
+      const spreads = saved && Array.isArray(saved.spreads) && saved.spreads.length > 0
+        ? saved.spreads
+        : DEFAULT_SPREADS
+      return sendJson(res, 200, { spreads })
+    }
+
+    if (pathname === '/api/tarot/spreads' && req.method === 'POST') {
+      const body = await readBody(req)
+      const spreads = Array.isArray(body?.spreads) ? body.spreads : []
+      // 基本校验：每个牌阵需有 id / name / positions 数组
+      const valid = spreads.filter(s => s && s.id && s.name && Array.isArray(s.positions) && s.positions.length > 0)
+      writeStorage('tarot_spreads', { spreads: valid })
+      return sendJson(res, 200, { spreads: valid })
     }
 
     // ===== 代码执行 API =====
@@ -1419,6 +1491,30 @@ ${messagesText}
       return sendJson(res, 200, { data: map })
     }
 
+    // ===== 欲望驱动系统 =====
+    // 只读：返回驱动条/召唤力/此刻最想做的事/念头池（开关关也能看）
+    if (pathname === '/api/desire/state' && req.method === 'GET') {
+      return sendJson(res, 200, { data: getDesireState() })
+    }
+
+    // 手动喂念头（同 text 再喂会加强）。text 只作数据，不拼进任何 prompt。
+    if (pathname === '/api/desire/feed' && req.method === 'POST') {
+      const body = await readBody(req)
+      if (!body || !body.text || typeof body.text !== 'string') {
+        return sendJson(res, 400, { error: '缺少念头文本 text' })
+      }
+      if (body.drive && !DESIRE_DRIVE_KEYS.includes(body.drive)) {
+        return sendJson(res, 400, { error: `drive 需为以下之一: ${DESIRE_DRIVE_KEYS.join('/')}` })
+      }
+      const thoughts = feedDesireThought({
+        text: body.text,
+        drive: body.drive,
+        kind: body.kind,
+        strength: body.strength,
+      })
+      return sendJson(res, 200, { data: thoughts })
+    }
+
     // ===== 数据备份：导出全部本地 JSON =====
     if (pathname === '/api/export' && req.method === 'GET') {
       const keys = listStorageKeys()
@@ -1498,11 +1594,13 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('  GET/POST/PUT/DELETE /api/schedule  (日程/日历)')
   console.log('  GET/POST/PUT/DELETE /api/anniversary  (纪念日/提醒)')
   console.log('  GET/POST /api/shift, GET/PUT /api/shift-types  (排班表)')
+  console.log('  GET /api/desire/state, POST /api/desire/feed  (欲望驱动系统)')
   
   setupDailyDiaryTask()
   setupProactiveTask()
   setupReminderTask()
   setupAnniversaryTask()
+  setupDesireTask()
   
   setTimeout(() => {
     checkAndBackfillMissingDiaries().catch(err => {

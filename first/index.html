@@ -2,6 +2,13 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
+    <!-- 主题预设：React 挂载前执行，避免首屏闪烁 -->
+    <script>
+      (function () {
+        var t = localStorage.getItem('x_theme')
+        document.documentElement.setAttribute('data-theme', t === 'night' ? 'night' : 'light')
+      })()
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>X · 阅读伙伴</title>
     <!-- PWA 主题色与图标 -->

@@ -467,7 +467,7 @@ function ReadingPartner({ onClose, onSendMessage }) {
 
       {/* 底部提示 */}
       <div className="reading-footer">
-        <p className="reading-tip" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}><LightbulbIcon size={16} /> 支持 TXT、文字版 PDF</p>
+        <p className="reading-tip" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}><LightbulbIcon size={16} /> 支持 TXT、文字版 PDF、Word(.docx)</p>
       </div>
     </div>
   )
@@ -547,6 +547,14 @@ function UploadBookPage({ onBack, onClose }) {
     return full.trim()
   }
 
+  // 解析 docx：动态加载 mammoth 提取纯文本（仅 Word 2007+ 的 .docx，老 .doc 二进制格式不支持）
+  const parseDocx = async (file) => {
+    const mammoth = await import('mammoth/mammoth.browser')
+    const buf = await file.arrayBuffer()
+    const { value } = await mammoth.extractRawText({ arrayBuffer: buf })
+    return (value || '').trim()
+  }
+
   // 统一处理一个文件
   const handleFile = async (file) => {
     if (!file) return
@@ -567,13 +575,17 @@ function UploadBookPage({ onBack, onClose }) {
         text = await parseTxt(file)
       } else if (name.endsWith('.pdf')) {
         text = await parsePdf(file)
+      } else if (name.endsWith('.docx')) {
+        text = await parseDocx(file)
+      } else if (name.endsWith('.doc')) {
+        throw new Error('不支持老版 .doc 格式，请在 Word 里另存为 .docx 后再上传。')
       } else {
-        throw new Error('目前只支持 .txt 和 文字版 .pdf')
+        throw new Error('目前只支持 .txt、文字版 .pdf 和 .docx')
       }
 
       text = (text || '').trim()
       if (!text) {
-        throw new Error('没有提取到任何文字。如果是扫描版/图片版 PDF，无法读取其中文字。')
+        throw new Error('没有提取到任何文字。如果是扫描版/图片版 PDF 或纯图片 Word，无法读取其中文字。')
       }
       if (text.length > MAX_NOTE_CHARS) {
         text = text.slice(0, MAX_NOTE_CHARS)
@@ -900,7 +912,7 @@ function UploadBookPage({ onBack, onClose }) {
         >
           <div className="upload-icon" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{dragging ? <FileTextIcon size={56} /> : <UploadIcon size={56} />}</div>
           <div className="upload-text">{dragging ? '松开上传文件' : '拖拽文件到这里'}</div>
-          <div className="upload-hint">支持 .txt 和 文字版 .pdf</div>
+          <div className="upload-hint">支持 .txt、文字版 .pdf 和 .docx</div>
         </div>
 
         <div className="upload-or">—— 或者 ——</div>
@@ -917,7 +929,7 @@ function UploadBookPage({ onBack, onClose }) {
           ref={fileInputRef}
           type="file"
           className="hidden-file-input"
-          accept=".txt,.pdf"
+          accept=".txt,.pdf,.docx"
           onChange={handleFileSelect}
         />
 
@@ -981,6 +993,7 @@ function UploadBookPage({ onBack, onClose }) {
           <div className="upload-supported-formats">
             <span className="format-tag" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><FileTextIcon size={12} /> .txt</span>
             <span className="format-tag" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><FileTextIcon size={12} /> .pdf（文字版）</span>
+            <span className="format-tag" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><FileTextIcon size={12} /> .docx（Word）</span>
           </div>
           <div style={{ fontSize: 12, color: '#B5B0AB', marginTop: 8 }}>
             提示：扫描版/图片版 PDF 无法提取文字。

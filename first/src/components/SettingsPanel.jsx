@@ -25,14 +25,24 @@ function SettingsPanel({ onClose, onSave }) {
     memory_threshold: '3000',
     keep_recent_messages: '10',
     deep_thinking: false,
+    desire_driven_enabled: false,
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saveMessage, setSaveMessage] = useState('')
+  const [theme, setThemeState] = useState(
+    () => (typeof localStorage !== 'undefined' && localStorage.getItem('x_theme') === 'night') ? 'night' : 'light'
+  )
 
   useEffect(() => {
     loadSettings()
   }, [])
+
+  const setTheme = (name) => {
+    document.documentElement.setAttribute('data-theme', name)
+    localStorage.setItem('x_theme', name)
+    setThemeState(name)
+  }
 
   const loadSettings = async () => {
     setLoading(true)
@@ -96,6 +106,29 @@ function SettingsPanel({ onClose, onSave }) {
         </div>
 
         <div className="panel-content">
+          <div className="settings-section">
+            <h3 className="settings-section-title">界面主题</h3>
+            <p className="settings-section-desc">选择聊天界面的配色风格</p>
+            <div className="theme-options">
+              <button
+                type="button"
+                className={`theme-option ${theme === 'light' ? 'active' : ''}`}
+                onClick={() => setTheme('light')}
+              >
+                <span className="theme-swatch theme-swatch-light"></span>
+                日间
+              </button>
+              <button
+                type="button"
+                className={`theme-option ${theme === 'night' ? 'active' : ''}`}
+                onClick={() => setTheme('night')}
+              >
+                <span className="theme-swatch theme-swatch-night"></span>
+                夜间
+              </button>
+            </div>
+          </div>
+
           <div className="settings-section">
             <h3 className="settings-section-title">聊天对象名称</h3>
             <p className="settings-section-desc">设置 AI 的显示名称</p>
@@ -226,6 +259,25 @@ function SettingsPanel({ onClose, onSave }) {
                 />
                 <p className="settings-hint">压缩后保留最近多少轮对话</p>
               </div>
+            </div>
+          </div>
+
+          <div className="settings-section">
+            <h3 className="settings-section-title">内在驱动（实验）</h3>
+            <p className="settings-section-desc">让 X 的主动行为由内在缺口（驱动条）决定，而非纯随机想念</p>
+
+            <div className="settings-item settings-toggle-row">
+              <div>
+                <label className="settings-label">欲望驱动主动行为</label>
+                <p className="settings-hint">关闭时只在「X的内心」里演算观察、不影响行为；开启后 X 会按当下最强的欲望主动冒头（受疲惫闸/冷静期/每日上限约束）</p>
+              </div>
+              <button
+                type="button"
+                className={`tool-toggle ${(settings.desire_driven_enabled === true || settings.desire_driven_enabled === 'true') ? 'on' : ''}`}
+                onClick={() => handleChange('desire_driven_enabled', !(settings.desire_driven_enabled === true || settings.desire_driven_enabled === 'true'))}
+              >
+                <span className="toggle-thumb"></span>
+              </button>
             </div>
           </div>
         </div>

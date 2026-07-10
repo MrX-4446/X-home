@@ -22,6 +22,17 @@
   --radius-full: 9999px;
 }
 
+/* 夜间主题：只覆盖有色相的变量，其余继承 :root（原始日间配色） */
+:root[data-theme="night"] {
+  --background-soft: #F4F2EF;
+  --background-card: #EAE6E4;
+  --text-primary: #36404B;
+  --text-secondary: #5E6B78;
+  --text-muted: #9197A0;
+  --border-color: rgba(74, 93, 108, 0.20);
+  --primary-warm-gray-blue-dark: #4A5D6C; /* 用户气泡底色 */
+}
+
 * {
   margin: 0;
   padding: 0;

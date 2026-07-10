@@ -14,6 +14,10 @@ function normalizeToolName(name) {
     '系统时间': 'system_time',
     '日程查询': 'query_schedule',
     '排班查询': 'query_shifts',
+    '塔罗占卜': 'tarot_reading',
+    '今日运势': 'daily_fortune',
+    '周公解梦': 'dream_interpretation',
+    '小六壬': 'liuren_divination',
   }
   if (readableNameMap[text]) return readableNameMap[text]
   return text
@@ -24,7 +28,28 @@ function normalizeToolName(name) {
     .slice(0, 48) || 'custom_tool'
 }
 
+// 读取牌阵库（kv 键 tarot_spreads），无则用默认牌阵库。供塔罗工具描述动态拼装。
+function getTarotSpreads() {
+  try {
+    const { readStorage } = require('./storage')
+    const { DEFAULT_SPREADS } = require('./divination')
+    const saved = readStorage('tarot_spreads')
+    const spreads = saved && Array.isArray(saved.spreads) ? saved.spreads : null
+    return spreads && spreads.length > 0 ? spreads : DEFAULT_SPREADS
+  } catch {
+    try {
+      return require('./divination').DEFAULT_SPREADS
+    } catch {
+      return []
+    }
+  }
+}
+
 function buildToolDefinitions(enabledTools) {
+  // 塔罗牌阵清单动态拼进工具描述，让模型根据问题性质自选牌阵（不写死）
+  const spreads = getTarotSpreads()
+  const spreadLines = spreads.map(s => `${s.id}（${s.name}）：${s.scope}`).join('；')
+
   const toolSchemas = {
     '网页搜索': {
       description: '实时搜索互联网信息，获取最新新闻、事实查询等',
@@ -93,6 +118,37 @@ function buildToolDefinitions(enabledTools) {
         language: { type: 'string', description: '编程语言：python 或 javascript' },
       },
       required: ['code'],
+    },
+    '塔罗占卜': {
+      description: `塔罗牌占卜。当轩想抽塔罗、占卜某件事/感情/选择时使用。你要根据轩问题的性质，从以下牌阵中自己选一个最合适的 spread：${spreadLines}。工具只负责洗牌抽牌返回牌面，牌义的解读由你结合问题、用自己的风格说出来。若选二选一牌阵，请一并把两个选项填入 optionA/optionB。`,
+      parameters: {
+        question: { type: 'string', description: '轩想占卜的问题' },
+        spread: { type: 'string', description: '牌阵 id，从工具描述列出的牌阵中自选最合适的一个' },
+        optionA: { type: 'string', description: '二选一牌阵时的选项A，可选' },
+        optionB: { type: 'string', description: '二选一牌阵时的选项B，可选' },
+      },
+      required: ['question'],
+    },
+    '今日运势': {
+      description: '查询某星座今天的运势（感情/财运/学业/健康/综合五维 + 幸运色/数字）。只在轩主动问运势时才用，不要主动推送。同一天同星座结果固定。',
+      parameters: {
+        sign: { type: 'string', description: '星座名，如「天蝎」「双鱼」，支持简称或全称' },
+      },
+      required: ['sign'],
+    },
+    '周公解梦': {
+      description: '查询梦境关键词的传统周公解梦释义。当轩说梦到了什么、想解梦时使用。工具返回传统释义，你再结合轩梦境的具体细节做温柔的解读。',
+      parameters: {
+        keyword: { type: 'string', description: '梦境关键词，如「蛇」「水」「掉牙」' },
+      },
+      required: ['keyword'],
+    },
+    '小六壬': {
+      description: '小六壬掐指起课，快速占问一件事的吉凶（一事一卦）。当轩想「掐一卦」「算算今天顺不顺」「测一下这事」时使用。默认用当前时间起课，返回宫位与吉凶断语，你再结合轩问的事做解读。',
+      parameters: {
+        question: { type: 'string', description: '想占问的事，如「今天适合表白吗」' },
+      },
+      required: ['question'],
     },
   }
 
@@ -239,6 +295,50 @@ async function executeToolCall(toolCall, enabledTools) {
         return { ok: true, name: toolName, input: url, output: page.result }
       }
       return { ok: false, name: toolName, input: url, error: page.error }
+    }
+
+    // ========== 玄学工具（插件出数据，AI 出灵魂）==========
+
+    if (toolName === '塔罗占卜') {
+      const { castTarot } = require('./divination')
+      const question = String(args.question || args.query || '')
+      const spreadId = String(args.spread || '')
+      const spreads = getTarotSpreads()
+      // 按模型选的 id 取牌阵；没选或选错则回退到单张指引
+      const spread = spreads.find(s => s.id === spreadId) || spreads.find(s => s.id === 'single') || spreads[0]
+      const result = castTarot(question, spread)
+      // 二选一牌阵：把模型传的选项名替换默认位置名，便于解读
+      if (spread && spread.id === 'two' && args.optionA && args.optionB && result.cards.length >= 2) {
+        result.cards[0].position = String(args.optionA)
+        result.cards[1].position = String(args.optionB)
+      }
+      return { ok: true, name: toolName, input: `${question}｜牌阵:${result.spreadName}`, output: JSON.stringify(result, null, 2) }
+    }
+
+    if (toolName === '今日运势') {
+      const { getDailyFortune } = require('./divination')
+      const sign = String(args.sign || args.query || '')
+      if (!sign) return { ok: false, name: toolName, error: '请告诉我你的星座' }
+      const result = getDailyFortune(sign)
+      return { ok: true, name: toolName, input: sign, output: JSON.stringify(result, null, 2) }
+    }
+
+    if (toolName === '周公解梦') {
+      const { interpretDream } = require('./divination')
+      const keyword = String(args.keyword || args.query || '')
+      if (!keyword) return { ok: false, name: toolName, error: '请告诉我你梦到了什么' }
+      const result = interpretDream(keyword)
+      const output = result.matched
+        ? `关键词「${result.keyword}」的传统解梦：${result.text}`
+        : `词典中暂无「${result.keyword}」的现成词条，请结合梦境细节自由解读。`
+      return { ok: true, name: toolName, input: keyword, output }
+    }
+
+    if (toolName === '小六壬') {
+      const { castLiuren } = require('./divination')
+      const question = String(args.question || args.query || '')
+      const result = castLiuren(question)
+      return { ok: true, name: toolName, input: question, output: JSON.stringify(result, null, 2) }
     }
 
     // 默认工具响应

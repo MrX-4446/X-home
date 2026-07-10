@@ -61,9 +61,40 @@ function shouldSendProactive(chat) {
   return true
 }
 
+// 把一条主动消息写入会话并推送通知栏（供随机想念/欲望驱动 tease 等出口共用）。
+// 复用最新存储读写，避免覆盖并发写入。返回 true 表示已写入。
+function writeProactiveMessage(chatId, content, pushType = 'proactive') {
+  const text = (content || '').trim()
+  if (!text) return false
+
+  const chats = readStorage('chats') || []
+  const target = chats.find(c => c.id === chatId)
+  if (!target) return false
+  target.messages = target.messages || []
+  const newMsg = {
+    id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    chat_id: chatId,
+    role: 'assistant',
+    content: text,
+    proactive: true,
+    proactive_kind: pushType, // 标记来源（proactive/tease…），供各出口做独立频控统计
+    created_at: new Date().toISOString(),
+  }
+  target.messages.push(newMsg)
+  target.updated_at = new Date().toISOString()
+  writeStorage('chats', chats)
+
+  // 推送到设备通知栏（App 关闭也能收到；未配置极光则自动跳过）
+  sendPush('恋人 X', text, { chatId, type: pushType }).catch(() => {})
+  return true
+}
+
 // 为某个会话生成并写入一条主动消息
-async function generateProactiveMessage(chat) {
+// options.sceneHint：可选，来自欲望驱动系统的第一人称内心动机（如「有点想轩了」），
+//   用于替换默认场景，让主动消息由「内在缺口」着色，而非纯随机想念。
+async function generateProactiveMessage(chat, options = {}) {
   const chatId = chat.id
+  const sceneHint = options && typeof options.sceneHint === 'string' ? options.sceneHint.trim() : ''
 
   // 拉取相关记忆作为灵感（喜好 / 最近日记等）
   let memoryContext = ''
@@ -90,7 +121,7 @@ async function generateProactiveMessage(chat) {
   else timeOfDay = '深夜'
 
   const proactivePrompt = `${baseRules ? baseRules + '\n\n' : ''}${userSystemPrompt ? userSystemPrompt + '\n\n' : ''}${memoryContext}
-【当前场景】现在是${timeOfDay}。你（作为恋人X）此刻突然想起了轩，于是主动发起一条消息找他聊天。
+【当前场景】现在是${timeOfDay}。${sceneHint ? `你（作为恋人X）此刻的心情是：${sceneHint}于是主动发起一条消息找轩。` : '你（作为恋人X）此刻突然想起了轩，于是主动发起一条消息找他聊天。'}
 【要求】
 - 这是你主动发起的对话，不是在回复轩，所以不要出现"你说的""收到"之类回应性措辞。
 - 自然、生活化，像真的想念一个人时随口发的一句话，可以结合上面记忆里的内容或当前时间段。
@@ -106,28 +137,11 @@ async function generateProactiveMessage(chat) {
     return false
   }
 
-  // 写入 chat.messages（重新读取最新存储，避免覆盖并发写入）
-  const chats = readStorage('chats') || []
-  const target = chats.find(c => c.id === chatId)
-  if (!target) return false
-  target.messages = target.messages || []
-  const newMsg = {
-    id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    chat_id: chatId,
-    role: 'assistant',
-    content,
-    proactive: true,
-    created_at: new Date().toISOString(),
+  const ok = writeProactiveMessage(chatId, content, 'proactive')
+  if (ok) {
+    console.log(`[主动消息] 会话 ${chatId} 已主动发送: ${content.substring(0, 40)}...`)
   }
-  target.messages.push(newMsg)
-  target.updated_at = new Date().toISOString()
-  writeStorage('chats', chats)
-
-  // 推送到设备通知栏（App 关闭也能收到；未配置极光则自动跳过）
-  sendPush('恋人 X', content, { chatId, type: 'proactive' }).catch(() => {})
-
-  console.log(`[主动消息] 会话 ${chatId} 已主动发送: ${content.substring(0, 40)}...`)
-  return true
+  return ok
 }
 
 // 单次扫描：遍历所有会话，命中则生成主动消息
@@ -160,5 +174,7 @@ function setupProactiveTask() {
 module.exports = {
   proactiveTick,
   generateProactiveMessage,
+  writeProactiveMessage,
+  loadBaseRules,
   setupProactiveTask,
 }

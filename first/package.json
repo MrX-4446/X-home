@@ -17,6 +17,7 @@
     "@capacitor/share": "^6.0.4",
     "capacitor-plugin-jpushn": "^6.0.7",
     "lunar-javascript": "^1.7.7",
+    "mammoth": "^1.12.0",
     "pdfjs-dist": "^4.0.379",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"

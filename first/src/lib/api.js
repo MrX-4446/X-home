@@ -287,6 +287,31 @@ export async function deleteTool(toolId) {
   }
 }
 
+// ===== 塔罗牌阵库 =====
+
+export async function getTarotSpreads() {
+  try {
+    const res = await request('/api/tarot/spreads')
+    return res?.spreads || []
+  } catch (err) {
+    console.error('获取塔罗牌阵失败:', err)
+    return []
+  }
+}
+
+export async function saveTarotSpreads(spreads) {
+  try {
+    const res = await request('/api/tarot/spreads', {
+      method: 'POST',
+      body: JSON.stringify({ spreads }),
+    })
+    return res?.spreads || []
+  } catch (err) {
+    console.error('保存塔罗牌阵失败:', err)
+    return []
+  }
+}
+
 // ===== 代码执行 =====
 
 export async function executeCode(code) {
@@ -727,6 +752,33 @@ export async function deleteAnniversary(id) {
   } catch (err) {
     console.error('删除纪念日失败:', err)
     return false
+  }
+}
+
+// ===== 欲望驱动系统 API =====
+
+// 获取 X 的内心状态：驱动条 / 召唤力 / 此刻最想做的事 / 念头池（只读，开关关也能看）
+export async function getDesireState() {
+  try {
+    const res = await request('/api/desire/state')
+    return res?.data || null
+  } catch (err) {
+    console.error('获取欲望状态失败:', err)
+    return null
+  }
+}
+
+// 手动喂一条念头（同 text 再喂会加强）
+export async function feedDesireThought({ text, drive, kind, strength }) {
+  try {
+    const res = await request('/api/desire/feed', {
+      method: 'POST',
+      body: JSON.stringify({ text, drive, kind, strength }),
+    })
+    return res?.data || []
+  } catch (err) {
+    console.error('喂念头失败:', err)
+    return null
   }
 }
 

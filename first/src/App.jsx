@@ -9,6 +9,7 @@ import DiaryPanel from './components/DiaryPanel'
 import AppCheckPanel from './components/AppCheckPanel'
 import CalendarPanel from './components/CalendarPanel'
 import ReadingPartner from './components/ReadingPartner'
+import DesirePanel from './components/DesirePanel'
 import Sidebar from './components/Sidebar'
 import ChatArea from './components/ChatArea'
 import errorMonitor from './lib/errorMonitor'
@@ -81,6 +82,7 @@ function App() {
   const [appCheckOpen, setAppCheckOpen] = useState(false)
   const [calendarOpen, setCalendarOpen] = useState(false)
   const [readingOpen, setReadingOpen] = useState(false) // 共读伴侣界面
+  const [desireOpen, setDesireOpen] = useState(false) // X 的内心（欲望驱动系统）
   // 工具列表以后端返回为准（loadTools 会覆盖），
   // 初始置空避免首屏闪现后端未实现的工具
   const [toolList, setToolList] = useState([])
@@ -154,7 +156,7 @@ function App() {
         preview: chat.preview || '开始新的对话...',
         time: formatTime(chat.updated_at),
         chatName: settings.chat_name || chat.chat_name || '智语助手',
-        chatAvatar: chat.chat_avatar || '智',
+        chatAvatar: chat.chat_avatar || 'X',
         messages: chat.messages || []
       }))
       console.log('格式化后的聊天列表:', formattedChats)
@@ -242,6 +244,7 @@ function App() {
     if (appCheckOpen) { setAppCheckOpen(false); return true }
     if (calendarOpen) { setCalendarOpen(false); return true }
     if (readingOpen) { setReadingOpen(false); return true }
+    if (desireOpen) { setDesireOpen(false); return true }
     if (sidebarOpen) { setSidebarOpen(false); return true }
     if (currentPage === 'chat') { setCurrentPage('home'); return true }
     return false
@@ -296,7 +299,7 @@ function App() {
         title: '新对话',
         preview: userText.substring(0, 30),
         chat_name: '智语助手',
-        chat_avatar: '智'
+        chat_avatar: 'X'
       })
       if (newChat) {
         chatId = newChat.id
@@ -419,7 +422,7 @@ function App() {
       title: '新对话',
       preview: '开始新的对话...',
       chat_name: settings.chat_name || '智语助手',
-      chat_avatar: '智'
+      chat_avatar: 'X'
     })
     if (newChat) {
       await loadChats()
@@ -504,6 +507,7 @@ function App() {
           onOpenAppCheck={() => setAppCheckOpen(true)}
           onOpenReading={() => setReadingOpen(true)}
           onOpenCalendar={() => setCalendarOpen(true)}
+          onOpenDesire={() => setDesireOpen(true)}
         />
       ) : (
         <>
@@ -615,6 +619,13 @@ function App() {
             setCurrentPage('chat')
             sendText(text)
           }}
+        />
+      )}
+
+      {/* X 的内心（欲望驱动系统）- 全屏 */}
+      {desireOpen && (
+        <DesirePanel
+          onClose={() => setDesireOpen(false)}
         />
       )}
     </div>

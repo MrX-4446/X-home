@@ -78,7 +78,7 @@ function ToolCallTimeline({ toolResults }) {
 // 消息头像：assistant 用 X 的头像，user 用轩的头像，均支持文字占位
 function MessageAvatar({ role, chatAvatar, userAvatar, hasHeart }) {
   const isAssistant = role === 'assistant'
-  const avatar = isAssistant ? (chatAvatar || '智') : (userAvatar || '轩')
+  const avatar = isAssistant ? (chatAvatar || 'X') : (userAvatar || '轩')
   return (
     <div className="message-avatar">
       {avatar}
