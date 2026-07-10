@@ -190,6 +190,88 @@ function applyDeepThinking(requestBody, aiProvider, deepThinking) {
   return requestBody
 }
 
+// ---------- 思考链剥离 ----------
+// 有的思考型模型（如部分火山/DeepSeek endpoint）不走独立的 reasoning_content 字段，
+// 而是把思考链当正文，用 <thinking>...</thinking> 或 <think>...</think> 包在 content 里。
+// 这两个工具负责把这类思考段落从正文里剔除，避免漏进气泡和数据库。
+
+// 非流式/兜底用：一次性剥离成对标签，以及被截断时只有开标签的残段。
+function stripThinkingTags(text) {
+  if (!text) return text || ''
+  let out = String(text).replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '')
+  // 只有开标签没闭合（模型被 max_tokens 截断）时，把开标签起的残段一并去掉
+  out = out.replace(/<think(?:ing)?>[\s\S]*$/i, '')
+  return out.replace(/\n{3,}/g, '\n\n').trim()
+}
+
+// 流式用：实时分流器。标签内文本走 onReasoning（前端折叠面板、不入库），
+// 标签外才是正文走 onContent。标签可能被切分到多个 delta，用 carry 缓冲跨片处理。
+// 注意：长标签需排在短标签前（<thinking> 先于 <think>），命中时优先吃掉更长的那个。
+function createThinkingSplitter(onContent, onReasoning) {
+  const OPEN = ['<thinking>', '<think>']
+  const CLOSE = ['</thinking>', '</think>']
+  let carry = ''
+  let inThinking = false
+
+  // carry 里最靠前的标签位置及命中的标签
+  function firstMarker(markers) {
+    let index = -1
+    let marker = null
+    for (const m of markers) {
+      const i = carry.indexOf(m)
+      if (i !== -1 && (index === -1 || i < index)) {
+        index = i
+        marker = m
+      }
+    }
+    return { index, marker }
+  }
+
+  // carry 末尾「可能是某标签前缀」的最长长度——需保留等下个分片补齐，避免半截标签被误当正文
+  function pendingLen(markers) {
+    let keep = 0
+    for (const m of markers) {
+      const maxK = Math.min(m.length - 1, carry.length)
+      for (let k = maxK; k > 0; k--) {
+        if (carry.slice(carry.length - k) === m.slice(0, k)) {
+          if (k > keep) keep = k
+          break
+        }
+      }
+    }
+    return keep
+  }
+
+  return {
+    push(text) {
+      carry += text
+      let progress = true
+      while (progress) {
+        progress = false
+        const markers = inThinking ? CLOSE : OPEN
+        const emit = inThinking ? onReasoning : onContent
+        const { index, marker } = firstMarker(markers)
+        if (index !== -1) {
+          if (index > 0) emit(carry.slice(0, index))
+          carry = carry.slice(index + marker.length)
+          inThinking = !inThinking
+          progress = true
+        } else {
+          const keep = pendingLen(markers)
+          const safe = carry.slice(0, carry.length - keep)
+          if (safe) emit(safe)
+          carry = carry.slice(carry.length - keep)
+        }
+      }
+    },
+    flush() {
+      if (!carry) return
+      ;(inThinking ? onReasoning : onContent)(carry)
+      carry = ''
+    },
+  }
+}
+
 // ---------- AI API 调用（OpenAI 兼容格式） ----------
 async function callAIProvider(provider, messages, options = {}) {
   const { tools = null, temperature, maxTokens, topP, useHelperAI = false, purpose = '主聊天' } = options
@@ -246,10 +328,13 @@ async function callAIProvider(provider, messages, options = {}) {
   const data = await response.json()
   const message = data.choices?.[0]?.message || {}
 
+  // 剥离正文里可能夹带的 <thinking> 思考链（思考型模型未走 reasoning_content 时）
+  const cleanContent = stripThinkingTags(message.content || '')
+
   return {
     ok: true,
-    reply: message.content || '',
-    message: message,
+    reply: cleanContent,
+    message: { ...message, content: cleanContent },
     toolCalls: message.tool_calls || [],
   }
 }
@@ -300,6 +385,18 @@ async function callAIProviderStream(provider, messages, options = {}, onDelta) {
   let finishReason = null
   let buffer = ''
 
+  // 思考链分流器：正文里夹带的 <thinking>...</thinking> 实时改走 reasoning 通道，
+  // 只有标签外的文本累积进 fullContent（即最终 reply / 入库正文）。
+  const emitReasoning = (t) => {
+    if (t && typeof onDelta === 'function') onDelta(t, 'reasoning')
+  }
+  const emitContent = (t) => {
+    if (!t) return
+    fullContent += t
+    if (typeof onDelta === 'function') onDelta(t, 'content')
+  }
+  const thinkingSplitter = createThinkingSplitter(emitContent, emitReasoning)
+
   // Node 18+ 的 fetch 返回的 body 是 Web ReadableStream，可用 for-await 迭代
   const decoder = new TextDecoder('utf-8')
   for await (const chunk of response.body) {
@@ -329,12 +426,12 @@ async function callAIProviderStream(provider, messages, options = {}, onDelta) {
       // 深度思考模型（如 deepseek-reasoner）的思考链走独立字段 reasoning_content，
       // 与正文 content 分开推送，前端可单独展示（折叠面板）。
       if (delta.reasoning_content) {
-        if (typeof onDelta === 'function') onDelta(delta.reasoning_content, 'reasoning')
+        emitReasoning(delta.reasoning_content)
       }
 
+      // 正文经分流器处理：标签内→reasoning，标签外→content（跨分片安全）
       if (delta.content) {
-        fullContent += delta.content
-        if (typeof onDelta === 'function') onDelta(delta.content, 'content')
+        thinkingSplitter.push(delta.content)
       }
 
       // 累积工具调用分片
@@ -353,6 +450,9 @@ async function callAIProviderStream(provider, messages, options = {}, onDelta) {
       if (choice.finish_reason) finishReason = choice.finish_reason
     }
   }
+
+  // 收尾：把分流器缓冲里残留的文本吐出（含未闭合 <thinking> 的兜底）
+  thinkingSplitter.flush()
 
   const toolCalls = Object.keys(toolCallsMap)
     .sort((a, b) => Number(a) - Number(b))
@@ -392,4 +492,5 @@ module.exports = {
   callAIProviderStream,
   estimateTokens,
   estimateMessagesTokens,
+  stripThinkingTags,
 }

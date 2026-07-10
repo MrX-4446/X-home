@@ -28,6 +28,7 @@ const {
   testAIProvider,
   callAIProvider,
   callAIProviderStream,
+  stripThinkingTags,
 } = require('./lib/ai-provider')
 
 // 工具层（工具定义 / 执行引擎）已抽离到 lib/tools.js
@@ -697,7 +698,8 @@ ${messagesText}
         }
 
         // 提取并剥离心语：正文下发/存储用干净文本，独白单独随 done 事件带给前端
-        const { reply: cleanReply, heart } = extractAndStripHeart(finalReply)
+        // stripThinkingTags 兜底：万一分流器漏了残段，入库前再清一次思考链
+        const { reply: cleanReply, heart } = extractAndStripHeart(stripThinkingTags(finalReply))
         sse({ type: 'done', reply: cleanReply, toolResults, heart })
         res.end()
 
@@ -963,7 +965,8 @@ ${messagesText}
           }
           
           // 提取并剥离心语：返回干净正文 + 单独的 heart 字段
-          const { reply: cleanReply, heart } = extractAndStripHeart(finalReply)
+          // stripThinkingTags 兜底：清掉正文里可能夹带的 <thinking> 思考链
+          const { reply: cleanReply, heart } = extractAndStripHeart(stripThinkingTags(finalReply))
           return sendJson(res, 200, { reply: cleanReply, toolResults: toolResults, heart })
       } catch (error) {
         console.error('对话处理错误:', error)
