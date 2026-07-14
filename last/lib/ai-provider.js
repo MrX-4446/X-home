@@ -134,7 +134,10 @@ function resolveProviderAndKey(provider, useHelperAI, role = null) {
         throw new Error(`${targetRole} 模型配置不可用：${envName}=${roleProviderId}`)
       }
     } else {
-      throw new Error(`未配置 ${envName}，${targetRole} 任务已停止以避免误用主聊天AI`)
+      aiProvider = enabledProviders[0]
+      if (!aiProvider) {
+        throw new Error(`未配置 ${envName}，且没有可用的AI提供商`)
+      }
     }
   } else if (provider) {
     const providerId = typeof provider === 'object' ? provider.id : provider
