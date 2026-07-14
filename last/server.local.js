@@ -109,7 +109,7 @@ const {
 } = require('./lib/memory/anniversaries')
 
 // 极光推送（设备 token 注册 + REST 单推）
-const { registerToken: registerPushToken, isConfigured: isPushConfigured } = require('./lib/push')
+const { registerToken: registerPushToken, isConfigured: isPushConfigured, getPushDiagnostics, sendPush: sendPushNotification } = require('./lib/push')
 
 // 欲望驱动系统（驱动条 / 念头池 / 心跳推进 / gating 开关）
 const {
@@ -1554,6 +1554,23 @@ ${messagesText}
       }
       const ok = registerPushToken(regId, body.platform || 'android')
       return sendJson(res, 200, { ok, configured: isPushConfigured() })
+    }
+
+    // ===== 极光推送：诊断状态（只读）=====
+    // 排查「收不到推送」时用：一眼看清是否配了凭证、有没有设备注册上来。
+    // deviceCount 为 0 → token 没上报到后端（前端极光初始化失败/未授权），推送必然被跳过。
+    if (pathname === '/api/push-status' && req.method === 'GET') {
+      return sendJson(res, 200, getPushDiagnostics())
+    }
+
+    // ===== 极光推送：立即发一条测试推送 =====
+    // 不用等每小时的定时任务，手机端点一下即可主动触发，
+    // 并把极光 REST API 的返回原样透传，便于区分「无设备/极光拒绝/已发出」。
+    if (pathname === '/api/push-test' && req.method === 'POST') {
+      const body = await readBody(req)
+      const content = (body && body.content) || '这是一条推送测试消息，如果你在通知栏看到它，说明推送链路正常～'
+      const result = await sendPushNotification('推送测试', content, { type: 'test' })
+      return sendJson(res, 200, result)
     }
 
     // ===== 排班表 / 工作日标注 =====

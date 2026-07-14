@@ -86,3 +86,37 @@ export async function setupPush() {
     console.warn('[极光] 初始化失败:', err?.message || err)
   }
 }
+
+// 设备端推送诊断：给「实时应用检查」面板用。
+// 返回本机通知权限状态与 RegistrationID（脱敏），用于区分
+// 「设备端没拿到 token」还是「拿到了但没上报到后端」。
+export async function getDevicePushDiagnostics() {
+  if (!isNative) {
+    return { native: false, reason: 'Web 环境不支持极光推送（仅 App 内生效）' }
+  }
+  let JPush
+  try {
+    ({ JPush } = await import('capacitor-plugin-jpushn'))
+  } catch (err) {
+    return { native: true, pluginLoaded: false, error: err?.message || String(err) }
+  }
+  const out = { native: true, pluginLoaded: true }
+  try {
+    const perm = await JPush.checkPermissions()
+    out.permission = perm?.notifications || 'unknown' // granted / denied / prompt
+  } catch (err) {
+    out.permission = 'unknown'
+    out.permissionError = err?.message || String(err)
+  }
+  try {
+    const r = await JPush.getRegistrationID()
+    const id = r?.registrationId || ''
+    out.hasRegistrationId = Boolean(id)
+    // 脱敏：设备唯一标识属敏感信息，只露首尾便于与后端核对
+    out.registrationIdPreview = id ? (id.length > 8 ? `${id.slice(0, 4)}****${id.slice(-4)}` : '****') : ''
+  } catch (err) {
+    out.hasRegistrationId = false
+    out.registrationIdError = err?.message || String(err)
+  }
+  return out
+}

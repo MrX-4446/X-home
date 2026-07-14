@@ -47,6 +47,25 @@ function listRegistrationIds() {
   return loadTokens().map(t => t.registrationId).filter(Boolean)
 }
 
+// ---------- 诊断辅助（供 /api/push-status 排查用）----------
+// 返回推送链路的关键状态：是否配了极光凭证、已注册设备数、以及脱敏后的
+// token 预览（仅保留首尾各 4 位，中间打码，避免在日志/接口里暴露完整 RegistrationID）。
+function getPushDiagnostics() {
+  const tokens = loadTokens()
+  const masked = tokens.map(t => {
+    const id = String(t.registrationId || '')
+    // 脱敏：设备唯一标识属敏感信息，只露首尾便于人工核对，不回传完整值
+    const preview = id.length > 8 ? `${id.slice(0, 4)}****${id.slice(-4)}` : '****'
+    return { preview, platform: t.platform || 'unknown', updated_at: t.updated_at || null }
+  })
+  return {
+    configured: isConfigured(),      // 是否已填 AppKey/MasterSecret
+    production: JPUSH_PRODUCTION,     // iOS 是否走 APNs 生产证书
+    deviceCount: tokens.length,       // 已注册设备数（为 0 则推送必然被跳过）
+    devices: masked,
+  }
+}
+
 // ---------- 推送 ----------
 // 向所有已注册设备单推一条通知。
 // extras 会随通知下发，前端可用于去重（如 { scheduleId }）。
@@ -109,5 +128,6 @@ module.exports = {
   isConfigured,
   registerToken,
   listRegistrationIds,
+  getPushDiagnostics,
   sendPush,
 }

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Capacitor } from '@capacitor/core'
 import errorMonitor from '../lib/errorMonitor'
 import { getApiUrl, exportData, importData } from '../lib/api'
+import { getDevicePushDiagnostics } from '../lib/push'
 
 function AppCheckPanel({ onClose }) {
   const [snapshot, setSnapshot] = useState(() => errorMonitor.getSnapshot())
@@ -11,12 +12,17 @@ function AppCheckPanel({ onClose }) {
   const [filter, setFilter] = useState('all') // all | high | medium | runtime | api
   const [backupMsg, setBackupMsg] = useState('')
   const [isBackuping, setIsBackuping] = useState(false)
+  // 推送诊断：设备端状态 + 后端状态 + 测试推送结果
+  const [pushDiag, setPushDiag] = useState(null)
+  const [pushTestMsg, setPushTestMsg] = useState('')
+  const [isPushBusy, setIsPushBusy] = useState(false)
   const tickRef = useRef(null)
   const fileInputRef = useRef(null)
 
   useEffect(() => {
     const unsubscribe = errorMonitor.subscribe(setSnapshot)
     runBasicChecks()
+    refreshPushDiagnostics()
 
     tickRef.current = setInterval(() => {
       setSnapshot({ ...errorMonitor.getSnapshot() })
@@ -108,6 +114,53 @@ function AppCheckPanel({ onClose }) {
     }))
     setBasicChecks(results)
     setIsLoadingChecks(false)
+  }
+
+  // 刷新推送诊断：同时取设备端（极光 SDK）与后端（已注册设备/凭证）状态
+  async function refreshPushDiagnostics() {
+    setIsPushBusy(true)
+    setPushTestMsg('')
+    const result = { device: null, server: null, serverError: null }
+    try {
+      result.device = await getDevicePushDiagnostics()
+    } catch (e) {
+      result.device = { error: e?.message || String(e) }
+    }
+    try {
+      const res = await fetch(getApiUrl('/api/push-status'))
+      result.server = await res.json()
+    } catch (e) {
+      result.serverError = e?.message || String(e)
+    }
+    setPushDiag(result)
+    setIsPushBusy(false)
+  }
+
+  // 立即触发一条测试推送，把极光返回透传出来，区分「无设备/被拒/已发出」
+  async function handlePushTest() {
+    setIsPushBusy(true)
+    setPushTestMsg('正在发送测试推送...')
+    try {
+      const res = await fetch(getApiUrl('/api/push-test'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      const data = await res.json()
+      if (data.ok) {
+        setPushTestMsg('✅ 后端已成功提交推送给极光。若通知栏没弹出，多为「App 被系统杀死 + 未接厂商通道」导致，属方案限制而非代码问题。')
+      } else if (data.skipped && data.reason === 'no_device') {
+        setPushTestMsg('⚠️ 无已注册设备：设备 token 未上报到后端。请在真机 App 内打开一次（授予通知权限）后重试。')
+      } else if (data.skipped && data.reason === 'not_configured') {
+        setPushTestMsg('⚠️ 后端未配置极光 AppKey/MasterSecret，请检查 .env。')
+      } else {
+        setPushTestMsg(`❌ 极光返回错误：HTTP ${data.status || '-'} ${data.error || JSON.stringify(data)}`)
+      }
+    } catch (e) {
+      setPushTestMsg(`❌ 请求失败：${e?.message || e}`)
+    } finally {
+      setIsPushBusy(false)
+    }
   }
 
   // 导出备份：手机 App 写入文档目录并调起分享；电脑浏览器直接下载
@@ -367,6 +420,113 @@ function AppCheckPanel({ onClose }) {
                       </div>
                     </div>
                   ))}
+                </div>
+              </div>
+
+              {/* 推送诊断 */}
+              <div className="checks-section">
+                <div className="section-header-bar">
+                  <h3 className="section-title">推送诊断</h3>
+                  <button className="header-btn" onClick={refreshPushDiagnostics} disabled={isPushBusy}>
+                    ↻ 刷新
+                  </button>
+                </div>
+                <div className="checks-list">
+                  {/* 设备端：极光 SDK 是否拿到 RegistrationID、通知权限 */}
+                  {(() => {
+                    const d = pushDiag?.device
+                    if (!d) return <div className="check-item"><div className="check-info"><p className="check-message">正在检测设备端...</p></div></div>
+                    if (d.native === false) {
+                      return (
+                        <div className="check-item">
+                          <div className="check-icon">ℹ</div>
+                          <div className="check-info">
+                            <div className="check-header"><span className="check-name">设备端（极光）</span></div>
+                            <p className="check-message">{d.reason}</p>
+                          </div>
+                        </div>
+                      )
+                    }
+                    const ok = d.pluginLoaded && d.hasRegistrationId && d.permission === 'granted'
+                    return (
+                      <div className={`check-item ${ok ? 'success' : 'error'}`}>
+                        <div className="check-icon">{ok ? '✓' : '✗'}</div>
+                        <div className="check-info">
+                          <div className="check-header">
+                            <span className="check-name">设备端（极光 SDK）</span>
+                            <span className={`check-status ${ok ? 'success' : 'error'}`}>{ok ? '正常' : '异常'}</span>
+                          </div>
+                          <p className="check-message">
+                            插件加载：{d.pluginLoaded ? '成功' : `失败 ${d.error || ''}`}；
+                            通知权限：{d.permission}；
+                            本机 RegistrationID：{d.hasRegistrationId ? d.registrationIdPreview : '未获取到'}
+                          </p>
+                          {!ok && (
+                            <div className="check-details">
+                              <strong>原因：</strong>
+                              {!d.pluginLoaded ? '极光插件未加载（需 npx cap sync 并重新构建 APK）'
+                                : d.permission !== 'granted' ? '通知权限未授予（Android 13+ 需运行时授权）'
+                                : '未拿到 RegistrationID（极光注册未成功，检查 AppKey/网络）'}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })()}
+
+                  {/* 后端：凭证是否配置、已注册设备数 */}
+                  {(() => {
+                    if (pushDiag?.serverError) {
+                      return (
+                        <div className="check-item error">
+                          <div className="check-icon">✗</div>
+                          <div className="check-info">
+                            <div className="check-header"><span className="check-name">后端推送</span><span className="check-status error">异常</span></div>
+                            <p className="check-message">无法获取：{pushDiag.serverError}</p>
+                          </div>
+                        </div>
+                      )
+                    }
+                    const s = pushDiag?.server
+                    if (!s) return null
+                    const ok = s.configured && s.deviceCount > 0
+                    return (
+                      <div className={`check-item ${ok ? 'success' : 'error'}`}>
+                        <div className="check-icon">{ok ? '✓' : '✗'}</div>
+                        <div className="check-info">
+                          <div className="check-header">
+                            <span className="check-name">后端推送</span>
+                            <span className={`check-status ${ok ? 'success' : 'error'}`}>{ok ? '正常' : '异常'}</span>
+                          </div>
+                          <p className="check-message">
+                            极光凭证：{s.configured ? '已配置' : '未配置'}；
+                            已注册设备：{s.deviceCount} 台
+                            {s.devices?.length > 0 && `（${s.devices.map(x => x.preview).join(', ')}）`}
+                          </p>
+                          {!ok && (
+                            <div className="check-details">
+                              <strong>原因：</strong>
+                              {!s.configured ? '后端 .env 未填 JPUSH_APP_KEY/JPUSH_MASTER_SECRET'
+                                : '无设备注册到后端：设备 token 未上报（先在真机 App 内授予通知权限并联网）'}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })()}
+                </div>
+
+                <div className="backup-box">
+                  <p className="backup-desc">
+                    点击下方按钮立即发送一条测试推送（无需等定时任务）。
+                    若后端显示已发出但通知栏没弹出，通常是 App 被系统杀死且未接入厂商通道所致——这是当前极光「仅自有通道」方案的固有限制。
+                  </p>
+                  <div className="backup-actions">
+                    <button className="header-btn" onClick={handlePushTest} disabled={isPushBusy}>
+                      ▶ 发送测试推送
+                    </button>
+                  </div>
+                  {pushTestMsg && <p className="backup-msg">{pushTestMsg}</p>}
                 </div>
               </div>
 
