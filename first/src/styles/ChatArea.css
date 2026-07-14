@@ -281,6 +281,24 @@
   padding: 0 8px;
 }
 
+/* 回复用量统计行：紧凑、低对比，放在气泡下方 */
+.message-stats {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 2px 8px 0;
+  line-height: 1.4;
+  opacity: 0.8;
+  font-variant-numeric: tabular-nums;
+}
+
+.message.assistant .message-stats {
+  text-align: left;
+}
+
+.message-stats-est {
+  opacity: 0.7;
+}
+
 .message.user .message-meta {
   justify-content: flex-end;
 }

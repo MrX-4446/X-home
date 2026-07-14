@@ -1,8 +1,11 @@
 import { useRef, useState } from 'react'
 import CustomSelect from './CustomSelect'
+import { parseDocumentFile, isSupportedDocFile } from '../lib/docParser'
 
 // 单条消息最多携带的图片数量（多模态模型对图片数量普遍有上限，且太多会撑爆 token）
 const MAX_IMAGES = 4
+// 单条消息最多携带的文档数量
+const MAX_DOCS = 3
 
 // 前端压缩图片：把用户选的图缩到最长边 maxSize、JPEG 质量 quality，转成 base64 data URL。
 // 这样直接内联进消息发给多模态模型，既省带宽也避免上传大图；返回 Promise<dataURL>。
@@ -49,15 +52,23 @@ function InputArea({
 }) {
   const textareaRef = useRef(null)
   const fileInputRef = useRef(null)
+  const docInputRef = useRef(null)
   // 待发送的图片（base64 data URL 数组），发送后清空
   const [pendingImages, setPendingImages] = useState([])
+  // 待发送的文档（{ name, text } 数组，text 为解析出的纯文字），发送后清空
+  const [pendingDocs, setPendingDocs] = useState([])
+  // 文档解析中/错误提示
+  const [docParsing, setDocParsing] = useState(false)
+  const [docError, setDocError] = useState('')
 
-  // 当前选中的 AI 是否支持图片（多模态）。只有开启「支持图片」的 AI 被选中，才显示上传按钮。
-  const currentAI = (models || []).find(m => m.id === selectedModel)
-  const canSendImage = !!currentAI?.supportsVision
+  // 是否显示上传图片按钮。
+  // 说明：主 AI 是纯文本模型也能"看图"——后端会用视觉副模型（VISION_AI_PROVIDER_ID）
+  // 把图片前置转译成文字再喂给主 AI，因此这里不再要求当前主 AI 自身支持图片，始终允许上传。
+  // 若后端未配置视觉副模型，图片会被降级成「[图片]」占位，不影响发送。
+  const canSendImage = true
 
-  // 有文字或有图片，且不在生成中，才允许发送
-  const canSubmit = (inputValue.trim() || pendingImages.length > 0) && !isTyping
+  // 有文字 / 图片 / 文档任一，且不在生成中、文档未在解析中，才允许发送
+  const canSubmit = (inputValue.trim() || pendingImages.length > 0 || pendingDocs.length > 0) && !isTyping && !docParsing
 
   const handleInputChange = (e) => {
     setInputValue(e.target.value)
@@ -71,11 +82,13 @@ function InputArea({
     }
   }
 
-  // 统一发送出口：把待发图片交给上层，随后清空本地图片状态
+  // 统一发送出口：把待发图片、文档交给上层，随后清空本地状态
   const doSend = () => {
     if (!canSubmit) return
-    onSend(pendingImages)
+    onSend(pendingImages, pendingDocs)
     setPendingImages([])
+    setPendingDocs([])
+    setDocError('')
   }
 
   const handleKeyDown = (e) => {
@@ -108,6 +121,40 @@ function InputArea({
     setPendingImages(prev => prev.filter((_, i) => i !== index))
   }
 
+  // 选择文档：逐个解析成纯文字后追加到待发列表（受 MAX_DOCS 限制）
+  const handlePickDocs = async (e) => {
+    const files = Array.from(e.target.files || [])
+    e.target.value = '' // 允许同一文件再次选中
+    if (files.length === 0) return
+    setDocError('')
+
+    const room = MAX_DOCS - pendingDocs.length
+    if (room <= 0) { setDocError(`最多 ${MAX_DOCS} 个文档`); return }
+    const picked = files.slice(0, room)
+
+    setDocParsing(true)
+    try {
+      for (const file of picked) {
+        if (!isSupportedDocFile(file)) {
+          setDocError('只支持 .txt、文字版 .pdf 和 .docx')
+          continue
+        }
+        try {
+          const parsed = await parseDocumentFile(file)
+          setPendingDocs(prev => [...prev, parsed].slice(0, MAX_DOCS))
+        } catch (err) {
+          setDocError(err.message || '文档解析失败')
+        }
+      }
+    } finally {
+      setDocParsing(false)
+    }
+  }
+
+  const removeDoc = (index) => {
+    setPendingDocs(prev => prev.filter((_, i) => i !== index))
+  }
+
   return (
     <div className="input-area">
       {/* 待发送图片预览区：仅在有图时出现 */}
@@ -133,6 +180,39 @@ function InputArea({
               </button>
             </div>
           ))}
+        </div>
+      )}
+      {/* 待发送文档预览区：仅在有文档或解析中/出错时出现 */}
+      {(pendingDocs.length > 0 || docParsing || docError) && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: '8px 12px 0', alignItems: 'center' }}>
+          {pendingDocs.map((doc, index) => (
+            <div key={index} style={{
+              position: 'relative', display: 'flex', alignItems: 'center', gap: 6,
+              padding: '4px 10px', borderRadius: 8, background: 'var(--bg-secondary, #f2f2f2)',
+              border: '1px solid var(--border-color, #e5e5e5)', maxWidth: 200,
+            }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+              </svg>
+              <span style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={doc.name}>
+                {doc.name}
+              </span>
+              <button
+                onClick={() => removeDoc(index)}
+                title="移除"
+                style={{
+                  width: 16, height: 16, borderRadius: '50%', border: 'none',
+                  background: 'rgba(0,0,0,0.5)', color: '#fff', fontSize: 11, lineHeight: '16px',
+                  textAlign: 'center', cursor: 'pointer', padding: 0, flexShrink: 0,
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+          {docParsing && <span style={{ fontSize: 12, color: 'var(--text-secondary, #999)' }}>正在解析文档…</span>}
+          {docError && <span style={{ fontSize: 12, color: '#e05353' }}>{docError}</span>}
         </div>
       )}
       <div className="input-container">
@@ -162,6 +242,29 @@ function InputArea({
               />
             </>
           )}
+          {/* 上传文档：txt / 文字版 pdf / docx，解析成文字随消息发给主 AI（总结/教学/工作学习） */}
+          <button
+            className="action-btn"
+            title={pendingDocs.length >= MAX_DOCS ? `最多 ${MAX_DOCS} 个文档` : '上传文档（txt / pdf / docx）'}
+            onClick={() => docInputRef.current?.click()}
+            disabled={pendingDocs.length >= MAX_DOCS || docParsing}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+          </button>
+          <input
+            ref={docInputRef}
+            type="file"
+            accept=".txt,.pdf,.docx"
+            multiple
+            onChange={handlePickDocs}
+            style={{ display: 'none' }}
+          />
         </div>
         <textarea
           ref={textareaRef}

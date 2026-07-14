@@ -92,6 +92,30 @@ function ReasoningBlock({ reasoning }) {
   )
 }
 
+// 回复用量统计行：总耗时 / 生成速度 / 总 token（真实数据，来自模型 usage）
+// 仅 assistant 消息且后端返回了 stats 时展示；estimated 为 true 时标注「约」。
+function MessageStats({ stats }) {
+  if (!stats) return null
+  const parts = []
+  if (stats.durationMs != null) {
+    parts.push(`总耗时 ${(stats.durationMs / 1000).toFixed(2)} s`)
+  }
+  if (stats.tokensPerSec != null) {
+    parts.push(`输出 ${stats.tokensPerSec} tokens/s`)
+  }
+  if (stats.totalTokens != null && stats.totalTokens > 0) {
+    parts.push(`共调用 ${stats.totalTokens} tokens`)
+  }
+  if (parts.length === 0) return null
+  return (
+    <div className="message-stats" title={stats.estimated ? 'token 为本地估算（模型未返回用量）' : '来自模型真实用量'}>
+      {stats.estimated && <span className="message-stats-est">约 </span>}
+      {parts.join(' · ')}
+    </div>
+  )
+}
+
+
 // 消息头像：assistant 用 X 的头像，user 用轩的头像，均支持文字占位
 function MessageAvatar({ role, chatAvatar, userAvatar, hasHeart }) {
   const isAssistant = role === 'assistant'
@@ -162,6 +186,7 @@ function Message({ message, status, chatAvatar, userAvatar }) {
           </div>
         )}
         {toolResults.length > 0 && <ToolCallTimeline toolResults={toolResults} />}
+        {message.role === 'assistant' && <MessageStats stats={message.stats} />}
         <div className="message-meta">
           <span className="message-time">
             {message.created_at ? new Date(message.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : message.time}

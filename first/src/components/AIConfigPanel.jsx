@@ -34,6 +34,9 @@ function AIConfigPanel({ onClose, aiList, onSave }) {
     providerType: 'openai_compatible',
     supportsVision: false,
   })
+  // 编辑态：正在编辑的 AI id + 表单数据（apiKey 留空表示不修改现有 Key）
+  const [editingId, setEditingId] = useState(null)
+  const [editAI, setEditAI] = useState({ name: '', apiKey: '', endpoint: '', model: '', supportsVision: false })
 
   // 当选择服务商时自动填充端点
   const handleProviderSelect = (providerId) => {
@@ -87,6 +90,48 @@ function AIConfigPanel({ onClose, aiList, onSave }) {
         setShowAddForm(false)
         setStatusMessage('AI 接入已添加')
       }
+    } catch (err) {
+      setStatusMessage(err.message)
+    }
+  }
+
+  // 开始编辑：把该 AI 现有信息填入编辑表单（apiKey 留空，占位提示保留原 Key）
+  const startEdit = (ai) => {
+    setEditingId(ai.id)
+    setShowAddForm(false)
+    setEditAI({
+      name: ai.name || '',
+      apiKey: '',
+      endpoint: ai.endpoint || '',
+      model: ai.model || '',
+      supportsVision: !!ai.supportsVision,
+    })
+  }
+
+  const cancelEdit = () => {
+    setEditingId(null)
+    setEditAI({ name: '', apiKey: '', endpoint: '', model: '', supportsVision: false })
+  }
+
+  const handleSaveEdit = async () => {
+    if (!editingId) return
+    if (!editAI.name || !editAI.endpoint || !editAI.model) {
+      setStatusMessage('名称、模型、端点不能为空')
+      return
+    }
+    try {
+      // apiKey 留空不发送，后端据此保留原 Key；填了才更新
+      const updates = {
+        name: editAI.name,
+        endpoint: editAI.endpoint,
+        model: editAI.model,
+        supportsVision: editAI.supportsVision,
+      }
+      if (editAI.apiKey.trim()) updates.apiKey = editAI.apiKey.trim()
+      const updated = await updateAIProvider(editingId, updates)
+      syncProviders(providers.map(ai => ai.id === editingId ? updated : ai))
+      cancelEdit()
+      setStatusMessage('AI 接入已更新')
     } catch (err) {
       setStatusMessage(err.message)
     }
@@ -196,6 +241,12 @@ function AIConfigPanel({ onClose, aiList, onSave }) {
                     <div className="ai-info">
                       <div className="ai-name">{ai.name}</div>
                       <div className="ai-endpoint">{ai.model} · {ai.endpoint}</div>
+                      <div className="ai-id-row">
+                        <span className="ai-id-label">ID：</span>
+                        <button className="ai-id-copy" onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(ai.id); setStatusMessage('ID 已复制到剪贴板'); }} title="点击复制">
+                          {ai.id}
+                        </button>
+                      </div>
                       <button
                         className={`ai-vision-toggle ${ai.supportsVision ? 'on' : ''}`}
                         title="是否为多模态模型：开启后，选中该 AI 时聊天框可发图片"
@@ -206,6 +257,12 @@ function AIConfigPanel({ onClose, aiList, onSave }) {
                     </div>
                   </div>
                   <div className="ai-item-actions">
+                    <button
+                      className="test-ai-btn"
+                      onClick={(e) => { e.stopPropagation(); startEdit(ai); }}
+                    >
+                      编辑
+                    </button>
                     <button 
                       className="test-ai-btn"
                       disabled={testingId === ai.id}
@@ -224,6 +281,74 @@ function AIConfigPanel({ onClose, aiList, onSave }) {
               ))}
             </div>
           </div>
+
+          {/* 编辑AI表单 */}
+          {editingId && (
+            <div className="ai-add-section">
+              <h3 className="ai-section-title">编辑 AI 接入</h3>
+              <div className="ai-form">
+                <div className="ai-form-item">
+                  <label className="ai-form-label">AI名称</label>
+                  <input
+                    type="text"
+                    className="ai-form-input"
+                    value={editAI.name}
+                    onChange={e => setEditAI({ ...editAI, name: e.target.value })}
+                    placeholder="输入AI名称"
+                  />
+                </div>
+                <div className="ai-form-item">
+                  <label className="ai-form-label">模型名称</label>
+                  <input
+                    type="text"
+                    className="ai-form-input"
+                    value={editAI.model}
+                    onChange={e => setEditAI({ ...editAI, model: e.target.value })}
+                    placeholder="如：gpt-4o"
+                  />
+                </div>
+                <div className="ai-form-item">
+                  <label className="ai-form-label">API密钥</label>
+                  <input
+                    type="password"
+                    className="ai-form-input"
+                    value={editAI.apiKey}
+                    onChange={e => setEditAI({ ...editAI, apiKey: e.target.value })}
+                    placeholder="留空则保留原有密钥"
+                  />
+                </div>
+                <div className="ai-form-item">
+                  <label className="ai-form-label">API端点</label>
+                  <input
+                    type="text"
+                    className="ai-form-input"
+                    value={editAI.endpoint}
+                    onChange={e => setEditAI({ ...editAI, endpoint: e.target.value })}
+                    placeholder="输入API端点"
+                  />
+                </div>
+                <div className="ai-form-item">
+                  <label className="ai-form-label" style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={editAI.supportsVision}
+                      onChange={e => setEditAI({ ...editAI, supportsVision: e.target.checked })}
+                      style={{ marginRight: 6 }}
+                    />
+                    支持图片输入（多模态模型）
+                  </label>
+                </div>
+                <div className="ai-form-actions">
+                  <button className="ai-form-btn ai-form-btn-secondary" onClick={cancelEdit}>
+                    取消
+                  </button>
+                  <button className="ai-form-btn ai-form-btn-primary" onClick={handleSaveEdit}>
+                    保存
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* 添加AI表单 */}
           {showAddForm && (

@@ -82,6 +82,42 @@ function listStorageKeys() {
   return _keysStmt.all().map(r => r.key)
 }
 
+// ---------- 存储体积统计（供「数据体积」面板只读展示） ----------
+// 返回：每个 key 的 JSON 字节数与条目数、向量表条数、数据库文件（含 WAL）总字节数。
+// 全部为只读统计，不改动任何数据。
+function getStorageStats() {
+  const rows = db.prepare('SELECT key, value FROM kv ORDER BY key').all()
+  const keys = rows.map(r => {
+    const value = r.value || ''
+    const bytes = Buffer.byteLength(value, 'utf8')
+    // 顶层若是数组则记条目数，是对象则记键数，否则为 null
+    let count = null
+    try {
+      const parsed = JSON.parse(value)
+      if (Array.isArray(parsed)) count = parsed.length
+      else if (parsed && typeof parsed === 'object') count = Object.keys(parsed).length
+    } catch { /* 非 JSON 或解析失败：不给条目数 */ }
+    return { key: r.key, bytes, count }
+  })
+
+  const kvBytes = keys.reduce((sum, k) => sum + k.bytes, 0)
+
+  let vectorCount = 0
+  try {
+    vectorCount = db.prepare('SELECT COUNT(*) AS n FROM memory_vectors').get().n || 0
+  } catch { /* 表不存在时忽略 */ }
+
+  // 数据库物理文件大小（主库 + WAL + SHM），反映磁盘实际占用
+  let dbFileBytes = 0
+  for (const suffix of ['', '-wal', '-shm']) {
+    try {
+      dbFileBytes += fs.statSync(DB_PATH + suffix).size
+    } catch { /* 文件不存在时忽略 */ }
+  }
+
+  return { keys, kvBytes, vectorCount, dbFileBytes }
+}
+
 // ---------- 向量索引存取（预留：当前无调用方写入，接入 embedding 后启用）----------
 // 写入/更新某条记忆的向量。embedding 传入数字数组，内部转 JSON 字符串存储。
 function writeMemoryVector(memoryId, embedding, model = null) {
@@ -182,6 +218,7 @@ module.exports = {
   readStorage,
   writeStorage,
   listStorageKeys,
+  getStorageStats,
   writeMemoryVector,
   readMemoryVector,
   readAllMemoryVectors,

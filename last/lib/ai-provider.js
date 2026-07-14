@@ -5,6 +5,17 @@
 
 const { readStorage, getSetting } = require('./storage')
 
+// ---------- AI 角色端口表（多副模型分工的统一入口） ----------
+// 主模型走前端传入的 provider；其余「副模型」角色各认一个环境变量，
+// 该变量的值 = 已在 AI 配置里添加并启用的某个接入的 id。
+// 未来要加新角色（如任务模型）、或更换某个副/主模型，只需改配置与此表，业务代码不动。
+const AI_ROLE_ENV = {
+  helper: 'HELPER_AI_PROVIDER_ID', // 辅助模型：记忆压缩 / 事实抽取等后台任务
+  vision: 'VISION_AI_PROVIDER_ID', // 视觉模型：读图 → 文字描述
+  task: 'TASK_AI_PROVIDER_ID',     // 任务模型（预留）：搜索/比价/代码等「任务简报」执行者。
+                                   // 端口已通：配好 TASK_AI_PROVIDER_ID 并用 callAIProvider(.., { role:'task' }) 即可启用。
+}
+
 // ---------- 默认 AI 提供商配置（本地存储为空时使用） ----------
 const defaultAIProviders = [
   {
@@ -97,7 +108,12 @@ async function testAIProvider(provider) {
 
 // ---------- 解析要使用的 AI 提供商 + API Key ----------
 // 从 callAIProvider 抽离，供普通调用与流式调用共享，避免逻辑重复。
-function resolveProviderAndKey(provider, useHelperAI) {
+// role：副模型角色（'helper' | 'vision' | ...），走 AI_ROLE_ENV 端口表定位接入；
+//       兼容旧参数 useHelperAI===true，等价于 role='helper'。
+function resolveProviderAndKey(provider, useHelperAI, role = null) {
+  // 兼容旧调用：useHelperAI 为 true 时视为 helper 角色
+  const targetRole = role || (useHelperAI ? 'helper' : null)
+
   let storedProviders = readStorage('ai-providers')
   // 如果存储为空或空数组，使用默认配置
   if (!storedProviders || storedProviders.length === 0) {
@@ -106,15 +122,19 @@ function resolveProviderAndKey(provider, useHelperAI) {
   const enabledProviders = storedProviders.filter(p => p.enabled)
   let aiProvider = null
 
-  if (useHelperAI) {
-    const helperId = process.env.HELPER_AI_PROVIDER_ID
-    if (helperId) {
-      aiProvider = enabledProviders.find(p => String(p.id) === String(helperId))
+  if (targetRole) {
+    const envName = AI_ROLE_ENV[targetRole]
+    if (!envName) {
+      throw new Error(`未知的 AI 角色：${targetRole}`)
+    }
+    const roleProviderId = process.env[envName]
+    if (roleProviderId) {
+      aiProvider = enabledProviders.find(p => String(p.id) === String(roleProviderId))
       if (!aiProvider) {
-        throw new Error(`辅助AI配置不可用：HELPER_AI_PROVIDER_ID=${helperId}`)
+        throw new Error(`${targetRole} 模型配置不可用：${envName}=${roleProviderId}`)
       }
     } else {
-      throw new Error('未配置 HELPER_AI_PROVIDER_ID，辅助任务已停止以避免误用主聊天AI')
+      throw new Error(`未配置 ${envName}，${targetRole} 任务已停止以避免误用主聊天AI`)
     }
   } else if (provider) {
     const providerId = typeof provider === 'object' ? provider.id : provider
@@ -268,9 +288,9 @@ function createThinkingSplitter(onContent, onReasoning) {
 
 // ---------- AI API 调用（OpenAI 兼容格式） ----------
 async function callAIProvider(provider, messages, options = {}) {
-  const { tools = null, temperature, maxTokens, topP, useHelperAI = false, purpose = '主聊天' } = options
+  const { tools = null, temperature, maxTokens, topP, useHelperAI = false, role = null, purpose = '主聊天' } = options
 
-  const { aiProvider, apiKey } = resolveProviderAndKey(provider, useHelperAI)
+  const { aiProvider, apiKey } = resolveProviderAndKey(provider, useHelperAI, role)
 
   console.log(`[AI调用] 类型: ${useHelperAI ? '辅助任务' : purpose}`)
   console.log(`[AI调用] 使用AI: ${aiProvider.name || aiProvider.id}`)
@@ -338,9 +358,9 @@ async function callAIProvider(provider, messages, options = {}) {
 // 返回值与 callAIProvider 一致：{ ok, reply, message, toolCalls }，
 // 便于复用后续的工具调用流程（工具调用不走增量展示，整体累积后返回）。
 async function callAIProviderStream(provider, messages, options = {}, onDelta) {
-  const { tools = null, temperature, maxTokens, topP, deepThinking = false, useHelperAI = false, purpose = '主聊天' } = options
+  const { tools = null, temperature, maxTokens, topP, deepThinking = false, useHelperAI = false, role = null, purpose = '主聊天' } = options
 
-  const { aiProvider, apiKey } = resolveProviderAndKey(provider, useHelperAI)
+  const { aiProvider, apiKey } = resolveProviderAndKey(provider, useHelperAI, role)
 
   console.log(`[AI流式调用] 类型: ${purpose}，模型: ${aiProvider.model}，深度思考: ${deepThinking ? '开' : '关'}`)
 
@@ -351,6 +371,8 @@ async function callAIProviderStream(provider, messages, options = {}, onDelta) {
     max_tokens: maxTokens ?? parseInt(getSetting('max_tokens') || '4096'),
     top_p: topP ?? parseFloat(getSetting('top_p') || '0.9'),
     stream: true,
+    // 请求在流末尾附带 token 用量（OpenAI 兼容：火山/百炼/DeepSeek 等均支持）
+    stream_options: { include_usage: true },
   }
 
   applyDeepThinking(requestBody, aiProvider, deepThinking)
@@ -360,6 +382,7 @@ async function callAIProviderStream(provider, messages, options = {}, onDelta) {
     requestBody.tool_choice = 'auto'
   }
 
+  const startedAt = Date.now()
   const response = await fetch(aiProvider.endpoint, {
     method: 'POST',
     headers: {
@@ -380,6 +403,9 @@ async function callAIProviderStream(provider, messages, options = {}, onDelta) {
   const toolCallsMap = {}
   let finishReason = null
   let buffer = ''
+  // token 用量（末尾 usage chunk 提供）与首字延迟（衡量响应速度）
+  let usage = null
+  let firstTokenAt = null
 
   // 思考链分流器：正文里夹带的 <thinking>...</thinking> 实时改走 reasoning 通道，
   // 只有标签外的文本累积进 fullContent（即最终 reply / 入库正文）。
@@ -417,9 +443,17 @@ async function callAIProviderStream(provider, messages, options = {}, onDelta) {
         continue // 不完整的分片，跳过（下次循环补齐）
       }
 
+      // 末尾 usage chunk：choices 为空但带 usage（token 用量），需在 choice 判空前捕获
+      if (json.usage) usage = json.usage
+
       const choice = json.choices?.[0]
       if (!choice) continue
       const delta = choice.delta || {}
+
+      // 首个正文/思考增量到达的时刻：用于计算「首字延迟」
+      if (firstTokenAt === null && (delta.content || delta.reasoning_content)) {
+        firstTokenAt = Date.now()
+      }
 
       // 深度思考模型（如 deepseek-reasoner）的思考链走独立字段 reasoning_content，
       // 与正文 content 分开推送，前端可单独展示（折叠面板）。
@@ -462,6 +496,28 @@ async function callAIProviderStream(provider, messages, options = {}, onDelta) {
   }
   if (toolCalls.length > 0) message.tool_calls = toolCalls
 
+  // 本次调用的用量/耗时统计（真实数据）
+  const endedAt = Date.now()
+  const durationMs = endedAt - startedAt
+  const promptTokens = usage?.prompt_tokens ?? null
+  const completionTokens = usage?.completion_tokens ?? null
+  const totalTokens = usage?.total_tokens ?? (
+    promptTokens != null && completionTokens != null ? promptTokens + completionTokens : null
+  )
+  // 生成速度：输出 token 数 / 生成耗时（从首字到结束），拿不到 usage 时以估算兜底
+  const genMs = firstTokenAt ? (endedAt - firstTokenAt) : durationMs
+  const outTokens = completionTokens ?? (fullContent ? estimateTokens(fullContent) : 0)
+  const tokensPerSec = genMs > 0 ? +(outTokens / (genMs / 1000)).toFixed(1) : null
+  const stats = {
+    durationMs,
+    firstTokenMs: firstTokenAt ? (firstTokenAt - startedAt) : null,
+    promptTokens,
+    completionTokens,
+    totalTokens,
+    tokensPerSec,
+    estimated: usage == null, // usage 缺失时标记为估算值
+  }
+
   return {
     ok: true,
     reply: fullContent,
@@ -469,6 +525,67 @@ async function callAIProviderStream(provider, messages, options = {}, onDelta) {
     message,
     toolCalls,
     finishReason,
+    stats,
+  }
+}
+
+// ---------- 视觉副模型：读图 → 文字描述 ----------
+// 用配置为 vision 角色的接入（VISION_AI_PROVIDER_ID）对单张图片产出简短中文描述，
+// 供纯文本主 AI「看懂」图片。走 OpenAI 兼容的多模态 messages 格式（image_url）。
+// 失败/未配置一律返回 null，由调用方决定回退（不影响主流程）。
+async function describeImage(imageUrl, options = {}) {
+  const url = String(imageUrl || '').trim()
+  if (!url) return null
+
+  let aiProvider, apiKey
+  try {
+    const resolved = resolveProviderAndKey(null, false, 'vision')
+    aiProvider = resolved.aiProvider
+    apiKey = resolved.apiKey
+  } catch (err) {
+    console.warn('[视觉模型] 未启用或配置不可用，跳过读图:', err.message)
+    return null
+  }
+
+  const prompt = options.prompt ||
+    '请用一到三句简体中文客观描述这张图片的主要内容（场景、主体、动作、明显文字）。如图中有文字，请原样列出关键文字。只描述看到的，不要推测、不要抒情。'
+
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), options.timeoutMs || 20000)
+
+    const response = await fetch(aiProvider.endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: aiProvider.model,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url } },
+          ],
+        }],
+        temperature: 0.2,
+        max_tokens: options.maxTokens || 300,
+      }),
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timer))
+
+    if (!response.ok) {
+      console.warn('[视觉模型] 调用失败 HTTP', response.status)
+      return null
+    }
+
+    const data = await response.json()
+    const desc = stripThinkingTags(data?.choices?.[0]?.message?.content || '').trim()
+    return desc || null
+  } catch (err) {
+    console.warn('[视觉模型] 读图异常，跳过:', err.message)
+    return null
   }
 }
 
@@ -489,6 +606,7 @@ module.exports = {
   testAIProvider,
   callAIProvider,
   callAIProviderStream,
+  describeImage,
   estimateTokens,
   estimateMessagesTokens,
   stripThinkingTags,

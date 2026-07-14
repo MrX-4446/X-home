@@ -7,6 +7,7 @@ require('dotenv').config()
 const http = require('http')
 const fs = require('fs')
 const path = require('path')
+const crypto = require('crypto')
 
 const PORT = process.env.PORT || 8888
 
@@ -16,6 +17,7 @@ const {
   readStorage,
   writeStorage,
   listStorageKeys,
+  getStorageStats,
   sendJson,
   readBody,
   getSetting,
@@ -28,6 +30,7 @@ const {
   testAIProvider,
   callAIProvider,
   callAIProviderStream,
+  describeImage,
   stripThinkingTags,
 } = require('./lib/ai-provider')
 
@@ -260,6 +263,61 @@ const BUILTIN_TOOLS = [
 
 // ========== 聊天共享逻辑（普通 / 流式 复用） ==========
 
+// ========== 视觉前置转译：把用户发的图片翻译成文字，喂给纯文本主 AI ==========
+// 主 AI 是纯文本模型，看不到图（图会被压成「[图片]」占位）。这里在构造 prompt 前，
+// 先用视觉副模型（describeImage）把当前消息里的图片转成中文描述，替换占位，让主 AI「读懂」图。
+// 描述结果按图片 URL 的哈希缓存到 kv（键 vision_desc_cache），同图不重复识别、不重复烧钱。
+// 视觉模型未配置/失败时 describeImage 返回 null，自动回退成原「[图片]」占位，不影响主流程。
+const VISION_CACHE_KEY = 'vision_desc_cache'
+const VISION_CACHE_MAX = 200 // 缓存条目上限，超出丢弃最早的
+
+function hashImageUrl(url) {
+  return crypto.createHash('sha1').update(String(url || '')).digest('hex')
+}
+
+function readVisionCache(hash) {
+  const cache = readStorage(VISION_CACHE_KEY)
+  if (cache && typeof cache === 'object' && cache[hash]) return cache[hash].desc || null
+  return null
+}
+
+function writeVisionCache(hash, desc) {
+  let cache = readStorage(VISION_CACHE_KEY)
+  if (!cache || typeof cache !== 'object' || Array.isArray(cache)) cache = {}
+  cache[hash] = { desc, at: new Date().toISOString() }
+  // 超上限则按写入时间丢弃最早的
+  const keys = Object.keys(cache)
+  if (keys.length > VISION_CACHE_MAX) {
+    keys.sort((a, b) => Date.parse(cache[a].at || 0) - Date.parse(cache[b].at || 0))
+    for (const k of keys.slice(0, keys.length - VISION_CACHE_MAX)) delete cache[k]
+  }
+  writeStorage(VISION_CACHE_KEY, cache)
+}
+
+// 就地把一条多模态消息里的图片段转译并并入文字段；返回是否发生了转译。
+// content 为多模态数组时才处理；处理后图片段替换为「[图片：描述]」文字段。
+async function translateImagesInContent(content) {
+  if (!Array.isArray(content)) return content
+
+  const out = []
+  for (const part of content) {
+    if (part?.type === 'image_url') {
+      const url = part.image_url?.url || part.image_url || ''
+      if (!url) { out.push({ type: 'text', text: '[图片]' }); continue }
+      const hash = hashImageUrl(url)
+      let desc = readVisionCache(hash)
+      if (!desc) {
+        desc = await describeImage(url)
+        if (desc) writeVisionCache(hash, desc)
+      }
+      out.push({ type: 'text', text: desc ? `[图片：${desc}]` : '[图片]' })
+    } else {
+      out.push(part)
+    }
+  }
+  return out
+}
+
 // 把消息 content 归一成纯文本：字符串原样返回；多模态数组取其中 text 段，
 // 图片段用「[图片]」占位。用于记忆检索/压缩/画像等只吃文字的环节，避免数组变成 [object Object]。
 function messageContentToText(content) {
@@ -378,13 +436,19 @@ ${relevantMemories.map((m, i) => `${i + 1}. ${m.summary || m.content}`).join('\n
     if (messagesCopy[i].role === 'user') { lastUserIdx = i; break }
   }
 
-  // 历史图片降级：只把「当前这条」用户消息的图片真正发给模型，
-  // 其余历史消息里的多模态图片压成文字占位，省 token/带宽，也避开多模态模型的图片数量上限。
-  messagesCopy.forEach((m, idx) => {
-    if (idx !== lastUserIdx && Array.isArray(m.content)) {
+  // 历史图片降级：只把「当前这条」用户消息的图片交给视觉副模型转译，
+  // 其余历史消息里的多模态图片压成文字占位，省 token/带宽。
+  // 当前消息的图片：用视觉副模型转成「[图片：描述]」文字段，让纯文本主 AI 读懂；
+  // 视觉模型未配置/失败时自动回退成「[图片]」占位。
+  for (let idx = 0; idx < messagesCopy.length; idx++) {
+    const m = messagesCopy[idx]
+    if (!Array.isArray(m.content)) continue
+    if (idx === lastUserIdx) {
+      m.content = await translateImagesInContent(m.content)
+    } else {
       m.content = messageContentToText(m.content)
     }
-  })
+  }
 
   // 在最后一条用户消息前加入人设指令（AI 最关注最后一条）
   if (lastUserIdx !== -1) {
@@ -684,6 +748,15 @@ const server = http.createServer(async (req, res) => {
         // 思考链累积：随回复一起入库，供历史消息折叠展示（两次调用的思考链拼接）
         let finalReasoning = firstResult.reasoning || ''
         const toolResults = []
+        // 用量/耗时统计：可能有两次模型调用，累加得到本轮真实总量
+        const statsAcc = {
+          durationMs: firstResult.stats?.durationMs || 0,
+          promptTokens: firstResult.stats?.promptTokens || 0,
+          completionTokens: firstResult.stats?.completionTokens || 0,
+          totalTokens: firstResult.stats?.totalTokens || 0,
+          tokensPerSec: firstResult.stats?.tokensPerSec || null,
+          estimated: firstResult.stats?.estimated ?? true,
+        }
 
         // 如果 AI 要求调用工具，执行后再做第二次流式调用
         if (firstResult.toolCalls && firstResult.toolCalls.length > 0) {
@@ -715,13 +788,23 @@ const server = http.createServer(async (req, res) => {
           if (secondResult.reasoning) {
             finalReasoning = finalReasoning ? `${finalReasoning}\n\n${secondResult.reasoning}` : secondResult.reasoning
           }
+          // 累加第二次调用的用量/耗时（最终回复的生成速度以第二次为准）
+          const s2 = secondResult.stats
+          if (s2) {
+            statsAcc.durationMs += s2.durationMs || 0
+            statsAcc.promptTokens += s2.promptTokens || 0
+            statsAcc.completionTokens += s2.completionTokens || 0
+            statsAcc.totalTokens += s2.totalTokens || 0
+            statsAcc.tokensPerSec = s2.tokensPerSec ?? statsAcc.tokensPerSec
+            statsAcc.estimated = statsAcc.estimated || s2.estimated
+          }
         }
 
         // 提取并剥离心语：正文下发/存储用干净文本，独白单独随 done 事件带给前端
         // stripThinkingTags 兜底：万一分流器漏了残段，入库前再清一次思考链
         const { reply: cleanReply, heart } = extractAndStripHeart(stripThinkingTags(finalReply))
         // reasoning 随 done 下发，让前端可随回复一起存库、历史消息里折叠展示
-        sse({ type: 'done', reply: cleanReply, toolResults, heart, reasoning: finalReasoning || null })
+        sse({ type: 'done', reply: cleanReply, toolResults, heart, reasoning: finalReasoning || null, stats: statsAcc })
         res.end()
 
         // 内向碎语自动喂念头：X 冒出的心里话 → 关联 attachment 的闪念（strength 0.45）
@@ -999,7 +1082,15 @@ ${fullSystemPrompt}
       const id = pathname.split('/')[3]
       const updates = await readBody(req)
       const provider = mockAIProviders.find(p => p.id === id)
-      if (provider) Object.assign(provider, updates, { updated_at: new Date().toISOString() })
+      if (provider) {
+        // apiKey 单独处理：前端字段名是 apiKey，存储/调用读的是 _apiKeyPlain。
+        // 留空或占位符（******）表示「不修改现有 Key」，避免编辑其它字段时误清空密钥。
+        const { apiKey, ...rest } = updates
+        Object.assign(provider, rest, { updated_at: new Date().toISOString() })
+        if (typeof apiKey === 'string' && apiKey.trim() && apiKey !== '******') {
+          provider._apiKeyPlain = apiKey.trim()
+        }
+      }
       writeStorage('ai-providers', mockAIProviders)
       return sendJson(res, 200, { data: sanitizeAIProvider(provider) })
     }
@@ -1520,6 +1611,53 @@ ${fullSystemPrompt}
       const id = pathname.split('/')[3]
       const result = deletePortraitItem(id)
       return sendJson(res, 200, { ok: true, removed: result.removed })
+    }
+
+    // ===== 数据体积 / 画像统计（只读，供「数据体积」面板展示） =====
+    if (pathname === '/api/stats' && req.method === 'GET') {
+      const storage = getStorageStats()
+
+      // 记忆分类统计：按 source 分组条数 + 活跃/归档
+      const memories = readStorage('memories') || []
+      const bySource = {}
+      let active = 0
+      for (const m of memories) {
+        const src = m.source || 'unknown'
+        bySource[src] = (bySource[src] || 0) + 1
+        if (m.is_active) active++
+      }
+      const memoryStats = {
+        total: memories.length,
+        active,
+        archived: memories.length - active,
+        bySource,
+      }
+
+      // 自我画像统计：stable / recent 条数 + 元信息
+      const portrait = listPortrait()
+      const portraitStats = {
+        stable: portrait.stable?.length || 0,
+        recent: portrait.recent?.length || 0,
+        total: (portrait.stable?.length || 0) + (portrait.recent?.length || 0),
+        meta: portrait.meta || {},
+      }
+
+      // 聊天条数（顶层键 chats 是数组）
+      const chats = readStorage('chats') || []
+      const messageCount = Array.isArray(chats)
+        ? chats.reduce((sum, c) => sum + (Array.isArray(c.messages) ? c.messages.length : 0), 0)
+        : 0
+
+      return sendJson(res, 200, {
+        data: {
+          storage,
+          memory: memoryStats,
+          portrait: portraitStats,
+          chat: { count: Array.isArray(chats) ? chats.length : 0, messages: messageCount },
+          vectorCount: storage.vectorCount,
+          generatedAt: new Date().toISOString(),
+        },
+      })
     }
 
     // ===== 数据备份：导出全部本地 JSON =====

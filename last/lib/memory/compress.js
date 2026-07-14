@@ -7,6 +7,12 @@
 const { readStorage, writeStorage } = require('../storage')
 const { defaultAIProviders, callAIProvider } = require('../ai-provider')
 const { onMemoryPersisted } = require('./embedding')
+const { calculateTextSimilarity } = require('./core')
+
+// 存入时相似记忆合并的参数
+const MERGE_SIMILARITY_THRESHOLD = 0.75 // TF 余弦相似度阈值，达到则合并进旧记忆而非新建
+const MERGE_WINDOW_HOURS = 48 // 只和近 N 小时内的压缩记忆比较
+const MERGE_MAX_CANDIDATES = 50 // 参与比较的候选记忆上限，控制开销
 
 // 把任意时间（Date / ISO 字符串 / 时间戳）转成北京时间（UTC+8）的 YYYY-MM-DD。
 // 记忆的日期归属统一走这里，避免各处用 UTC 或本地时区导致跨日归错。
@@ -191,6 +197,73 @@ function msgToText(content) {
   return content == null ? '' : String(content)
 }
 
+// 压缩前剔除文档正文，只保留「[文档：文件名]」线索。
+// 前端上传的文档会以 `【文档：文件名】\n"""\n正文\n"""` 形式内嵌进用户消息，
+// 文档正文（可能上万字）不应被压缩进 X 的长期记忆——否则污染情感记忆、撑长摘要。
+// 这里把整块替换成文件名占位，记忆里只留下「轩给过一份 XX 文档」这条线索，
+// 配合前后的提问/回复，X 依然记得"围绕这份文档聊过什么"，但不背下全文。
+function stripDocBodies(text) {
+  if (!text) return text || ''
+  // 匹配【文档：xxx】 后紧跟的 """ ... """ 三引号包裹的正文，整体替换为 [文档：xxx]
+  return String(text).replace(
+    /【文档：([^】]*)】\s*"""[\s\S]*?"""/g,
+    (_, name) => `[文档：${String(name).trim()}]`
+  )
+}
+
+// ========== 存入时自动合并相似记忆 ==========
+// 新压缩记忆写入前，先和「同会话、同一天、近 48h 内的压缩记忆」比相似度，
+// 达到阈值就就地合并进旧记忆（内容追加、重要度取 max、情绪取平均、刷新时间），
+// 而不是新建一条，避免长期积累大量大同小异的记忆。
+// 关键约束：只合并 date 相同的记忆——绝不跨天合并，以免破坏「跨天拆分归属」
+// 和依赖 date/created_at 的日记生成、即时补写。
+// 只处理 source='compression'，不碰 source='fact'（喜好/日程要精确，不能被糊掉）。
+// 命中合并返回被更新的旧记忆对象；未命中返回 null。
+function tryMergeIntoExisting(newMemory, memories) {
+  if (!newMemory || !Array.isArray(memories)) return null
+
+  const newTs = Date.parse(newMemory.created_at)
+  const refTs = Number.isFinite(newTs) ? newTs : Date.now()
+  const windowMs = MERGE_WINDOW_HOURS * 60 * 60 * 1000
+
+  // 候选：同 chat_id、同一天(date)、压缩来源、有效，且创建时间在参考时间前后 48h 内
+  const candidates = memories.filter(m => {
+    if (!m || m.source !== 'compression' || !m.is_active) return false
+    if (m.chat_id !== newMemory.chat_id) return false
+    if (m.date !== newMemory.date) return false // 绝不跨天合并
+    const ts = Date.parse(m.created_at)
+    if (!Number.isFinite(ts)) return false
+    return Math.abs(refTs - ts) <= windowMs
+  }).slice(-MERGE_MAX_CANDIDATES)
+
+  if (candidates.length === 0) return null
+
+  // 找相似度最高的一条
+  let best = null
+  let bestScore = 0
+  for (const m of candidates) {
+    const score = calculateTextSimilarity(newMemory.content, m.content)
+    if (score > bestScore) {
+      bestScore = score
+      best = m
+    }
+  }
+
+  if (!best || bestScore < MERGE_SIMILARITY_THRESHOLD) return null
+
+  // 就地合并（date 相同，无需改动 date/created_at，日记归属与即时补写不受影响）
+  const avg = (a, b) => (Number(a || 0) + Number(b || 0)) / 2
+  best.content = `${best.content}\n${newMemory.content}`.trim()
+  if (newMemory.summary && !best.summary) best.summary = newMemory.summary
+  best.importance = Math.max(Number(best.importance || 0), Number(newMemory.importance || 0))
+  best.valence = avg(best.valence, newMemory.valence)
+  best.arousal = avg(best.arousal, newMemory.arousal)
+  best.updated_at = newMemory.updated_at || new Date().toISOString()
+
+  console.log(`[记忆压缩] 与同日记忆相似度 ${bestScore.toFixed(2)} ≥ ${MERGE_SIMILARITY_THRESHOLD}，合并进已有记忆 ${best.id}`)
+  return best
+}
+
 // ========== 记忆压缩（统一实现，供所有调用点复用） ==========
 // 关键修复：按消息真实发生时间（北京时区）归属日期，跨天的一批消息按天拆分成多条记忆，
 // 每条记忆的 date / created_at 都落到「对话真实发生的那一天」，而不是「压缩触发的那一刻」。
@@ -215,7 +288,7 @@ async function compressMemory(chatId, messagesToCompress) {
   for (const dateStr of sortedDates) {
     const dayMessages = groups.get(dateStr)
     const messagesText = dayMessages.map(msg =>
-      `${msg.role === 'user' ? '用户' : 'X'}: ${msgToText(msg.content)}`
+      `${msg.role === 'user' ? '用户' : 'X'}: ${stripDocBodies(msgToText(msg.content))}`
     ).join('\n\n')
     if (!messagesText.trim()) continue
 
@@ -295,6 +368,17 @@ ${messagesText}
 
     // 重新读取最新存储，避免覆盖 extractFacts 刚写入的事实记忆
     const latestMemories = readStorage('memories') || []
+
+    // 存入前先尝试合并进近期相似的压缩记忆；命中则更新旧记忆，不新建
+    const merged = tryMergeIntoExisting(memory, latestMemories)
+    if (merged) {
+      writeStorage('memories', latestMemories)
+      await onMemoryPersisted(merged)
+      createdMemories.push(merged)
+      console.log(`[记忆压缩] ${dateStr}：${dayMessages.length} 条消息 -> 合并进已有记忆`)
+      continue
+    }
+
     latestMemories.push(memory)
     writeStorage('memories', latestMemories)
 

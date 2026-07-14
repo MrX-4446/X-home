@@ -1212,4 +1212,49 @@
 .app-check-panel .action-btn.primary:hover {
   background-color: var(--primary-warm-gray-blue-dark);
   border-color: var(--primary-warm-gray-blue-dark);
+  color: white;
+}
+
+/* ===== 数据体积面板：存储体积条形图 ===== */
+.app-check-fullscreen .stats-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.app-check-fullscreen .stats-bar-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.app-check-fullscreen .stats-bar-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.app-check-fullscreen .stats-bar-name {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.app-check-fullscreen .stats-bar-value {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.app-check-fullscreen .stats-bar-track {
+  height: 8px;
+  background-color: rgba(138, 133, 128, 0.15);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.app-check-fullscreen .stats-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary-warm-gray-green), var(--primary-warm-gray-blue));
+  border-radius: var(--radius-full);
+  transition: width 0.4s ease;
 }

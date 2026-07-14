@@ -10,6 +10,7 @@ import AppCheckPanel from './components/AppCheckPanel'
 import CalendarPanel from './components/CalendarPanel'
 import ReadingPartner from './components/ReadingPartner'
 import DesirePanel from './components/DesirePanel'
+import DataStatsPanel from './components/DataStatsPanel'
 import Sidebar from './components/Sidebar'
 import ChatArea from './components/ChatArea'
 import errorMonitor from './lib/errorMonitor'
@@ -83,6 +84,7 @@ function App() {
   const [calendarOpen, setCalendarOpen] = useState(false)
   const [readingOpen, setReadingOpen] = useState(false) // 共读伴侣界面
   const [desireOpen, setDesireOpen] = useState(false) // X 的内心（欲望驱动系统）
+  const [statsOpen, setStatsOpen] = useState(false) // 数据体积面板
   // 工具列表以后端返回为准（loadTools 会覆盖），
   // 初始置空避免首屏闪现后端未实现的工具
   const [toolList, setToolList] = useState([])
@@ -245,6 +247,7 @@ function App() {
     if (calendarOpen) { setCalendarOpen(false); return true }
     if (readingOpen) { setReadingOpen(false); return true }
     if (desireOpen) { setDesireOpen(false); return true }
+    if (statsOpen) { setStatsOpen(false); return true }
     if (sidebarOpen) { setSidebarOpen(false); return true }
     if (currentPage === 'chat') { setCurrentPage('home'); return true }
     return false
@@ -306,21 +309,36 @@ function App() {
 
   // 发送核心逻辑：接受纯文本 + 可选图片（base64 data URL 数组），供输入框发送与共读伴侣等场景直接调用，
   // 不再依赖 DOM 时序或模拟按键。
-  const sendText = async (rawText, images = []) => {
+  const sendText = async (rawText, images = [], docs = []) => {
     const userText = (rawText || '').trim()
     const hasImages = Array.isArray(images) && images.length > 0
-    if ((!userText && !hasImages) || isTyping) return
+    const hasDocs = Array.isArray(docs) && docs.length > 0
+    if ((!userText && !hasImages && !hasDocs) || isTyping) return
+
+    // 文档：把每个文档解析出的纯文字拼成引用块，附到用户文字后面（主 AI 是纯文本模型，
+    // 直接读文档文字即可，用于总结/教学/答疑等）。文档正文会随消息一起存库并纳入后续历史，
+    // 以便对同一文档的追问也能被 AI 引用（单文档已在解析时截断到上限，控制 token）。
+    let docBlock = ''
+    let docNames = []
+    if (hasDocs) {
+      docNames = docs.map(d => d.name)
+      docBlock = docs.map(d =>
+        `\n\n【文档：${d.name}】\n"""\n${d.text}\n"""`
+      ).join('')
+    }
+    // 消息正文 = 用户输入 + 文档正文（一份，贯穿存库/渲染/发给 AI）。
+    const textForAI = `${userText}${docBlock ? (userText ? '\n' : '') + docBlock : ''}`.trim()
 
     // 带图时用多模态数组作为 content（文字段可选 + 每张图一个 image_url 段），否则用纯字符串。
-    // 这一份 userContent 会贯穿：存库、渲染、发给 AI。
+    const displayText = userText || (hasDocs ? `[文档] ${docNames.join('、')}` : '')
     const userContent = hasImages
       ? [
-          ...(userText ? [{ type: 'text', text: userText }] : []),
+          ...(textForAI ? [{ type: 'text', text: textForAI }] : []),
           ...images.map(url => ({ type: 'image_url', image_url: { url } })),
         ]
-      : userText
-    // 会话列表预览文案：纯图片消息用「[图片]」占位
-    const previewText = userText || '[图片]'
+      : textForAI
+    // 会话列表预览文案：纯图片消息用「[图片]」占位；纯文档用文件名
+    const previewText = displayText || '[图片]'
 
     // 如果没有当前聊天，先创建一个
     let chatId = currentChatId
@@ -406,6 +424,7 @@ function App() {
           content: `${aiResult.reply || '（AI 没有返回内容）'}${toolMetadata}`,
           heart: aiResult.heart || null,
           reasoning: aiResult.reasoning || null,
+          stats: aiResult.stats || null,
         })
 
         await updateChatDB(chatId, {
@@ -435,12 +454,13 @@ function App() {
   }
 
   // 输入框发送：读取当前输入并清空，连同图片交给 sendText 处理
-  const handleSend = (images = []) => {
+  const handleSend = (images = [], docs = []) => {
     const text = inputValue.trim()
     const hasImages = Array.isArray(images) && images.length > 0
-    if ((!text && !hasImages) || isTyping) return
+    const hasDocs = Array.isArray(docs) && docs.length > 0
+    if ((!text && !hasImages && !hasDocs) || isTyping) return
     setInputValue('')
-    sendText(text, images)
+    sendText(text, images, docs)
   }
 
   const handleKeyPress = (e) => {
@@ -541,6 +561,7 @@ function App() {
           onOpenReading={() => setReadingOpen(true)}
           onOpenCalendar={() => setCalendarOpen(true)}
           onOpenDesire={() => setDesireOpen(true)}
+          onOpenStats={() => setStatsOpen(true)}
         />
       ) : (
         <>
@@ -659,6 +680,13 @@ function App() {
       {desireOpen && (
         <DesirePanel
           onClose={() => setDesireOpen(false)}
+        />
+      )}
+
+      {/* 数据体积 - 全屏 */}
+      {statsOpen && (
+        <DataStatsPanel
+          onClose={() => setStatsOpen(false)}
         />
       )}
     </div>
