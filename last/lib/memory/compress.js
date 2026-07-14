@@ -6,6 +6,16 @@
 
 const { readStorage, writeStorage } = require('../storage')
 const { defaultAIProviders, callAIProvider } = require('../ai-provider')
+const { onMemoryPersisted } = require('./embedding')
+
+// 把任意时间（Date / ISO 字符串 / 时间戳）转成北京时间（UTC+8）的 YYYY-MM-DD。
+// 记忆的日期归属统一走这里，避免各处用 UTC 或本地时区导致跨日归错。
+function beijingDateOf(time) {
+  const d = time ? new Date(time) : new Date()
+  const t = Number.isNaN(d.getTime()) ? new Date() : d
+  const beijing = new Date(t.getTime() + 8 * 60 * 60 * 1000)
+  return beijing.toISOString().split('T')[0]
+}
 
 // ========== 情感分析自动打标 ==========
 async function analyzeEmotion(content) {
@@ -81,7 +91,7 @@ ${content}
 async function extractFacts(chatId, messagesText) {
   if (!messagesText || !messagesText.trim()) return
 
-  const todayStr = new Date(new Date().getTime() + 8 * 60 * 60 * 1000).toISOString().split('T')[0]
+  const todayStr = beijingDateOf()
 
   const factPrompt = `从以下对话中抽取轩（用户）明确表达的【喜好】和【日程】，返回 JSON。要求：
 1. 只抽取对话中真实出现的信息，不要推测、不要编造，没有就返回空数组。
@@ -122,6 +132,7 @@ ${messagesText}`
     const memories = readStorage('memories') || []
     const nowIso = new Date().toISOString()
     let added = 0
+    const newFacts = []
 
     const pushFact = (text, factType) => {
       const content = String(text || '').trim()
@@ -129,7 +140,7 @@ ${messagesText}`
       // 简单去重：同类型、内容完全相同的有效记忆不重复添加
       const exists = memories.some(m => m.source === 'fact' && m.fact_type === factType && m.is_active && m.content === content)
       if (exists) return
-      memories.push({
+      const fact = {
         id: `fact-${Date.now()}-${added}`,
         chat_id: chatId,
         content,
@@ -146,7 +157,9 @@ ${messagesText}`
         date: todayStr,
         created_at: nowIso,
         updated_at: nowIso,
-      })
+      }
+      memories.push(fact)
+      newFacts.push(fact)
       added++
     }
 
@@ -155,6 +168,8 @@ ${messagesText}`
 
     if (added > 0) {
       writeStorage('memories', memories)
+      // 向量钩子（预留）：为新事实生成向量，当前默认空操作
+      for (const f of newFacts) await onMemoryPersisted(f)
       console.log(`[事实抽取] 新增 ${added} 条结构化事实记忆（喜好 ${likes.length} / 日程 ${schedules.length}）`)
     }
   } catch (err) {
@@ -162,18 +177,49 @@ ${messagesText}`
   }
 }
 
-// ========== 记忆压缩 ==========
+// 把单条消息内容转成纯文本（兼容多模态数组 / 字符串）。
+function msgToText(content) {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content.map(part => {
+      if (typeof part === 'string') return part
+      if (part?.type === 'text') return part.text || ''
+      if (part?.type === 'image_url') return '[图片]'
+      return ''
+    }).join(' ').trim()
+  }
+  return content == null ? '' : String(content)
+}
+
+// ========== 记忆压缩（统一实现，供所有调用点复用） ==========
+// 关键修复：按消息真实发生时间（北京时区）归属日期，跨天的一批消息按天拆分成多条记忆，
+// 每条记忆的 date / created_at 都落到「对话真实发生的那一天」，而不是「压缩触发的那一刻」。
+// 本函数只负责生成记忆（写 memories）与抽取事实，不改动 chats.messages，由调用方裁剪消息。
 async function compressMemory(chatId, messagesToCompress) {
-  if (messagesToCompress.length === 0) return
+  if (!Array.isArray(messagesToCompress) || messagesToCompress.length === 0) return []
 
-  const messagesText = messagesToCompress.map(msg => 
-    `${msg.role === 'user' ? '用户' : 'X'}: ${msg.content}`
-  ).join('\n\n')
+  // 按「消息 created_at 的北京日期」分组，保持组内原有顺序
+  const groups = new Map()
+  for (const msg of messagesToCompress) {
+    const dateStr = beijingDateOf(msg.created_at)
+    if (!groups.has(dateStr)) groups.set(dateStr, [])
+    groups.get(dateStr).push(msg)
+  }
 
-  // ===== 【重构】统一用 callAIProvider，启用辅助AI节省Token
-  console.log(`[记忆压缩] ${messagesToCompress.length} 条对话，调用AI压缩中...`)
-  
-  const compressPrompt = `请将以下对话内容压缩成记忆，以恋人 X 的视角，保留三类信息：
+  console.log(`[记忆压缩] ${messagesToCompress.length} 条对话，跨 ${groups.size} 天，逐日压缩中...`)
+
+  const createdMemories = []
+
+  // 按日期升序处理，便于日志与叙事
+  const sortedDates = Array.from(groups.keys()).sort()
+  for (const dateStr of sortedDates) {
+    const dayMessages = groups.get(dateStr)
+    const messagesText = dayMessages.map(msg =>
+      `${msg.role === 'user' ? '用户' : 'X'}: ${msgToText(msg.content)}`
+    ).join('\n\n')
+    if (!messagesText.trim()) continue
+
+    const compressPrompt = `请将以下对话内容压缩成记忆，以恋人 X 的视角，保留三类信息：
 1. 关于用户的重要信息：事实、喜好、约定、计划、情绪状态等；
 2. X（你）在对话里列过的清单、建议、方案、结论等有用内容，保留要点；
 3. X（你）自己流露过的态度、喜好和立场（仅限对话中真实说过的，用于保持人格一致），不要凭空发挥。
@@ -188,45 +234,53 @@ ${messagesText}
   "content": "完整记忆内容（按上面三类信息展开，保留关键细节）"
 }`
 
-  const result = await callAIProvider(null, [
-    { role: 'system', content: '你是恋人 X 的记忆整理助手，负责把对话浓缩成 X 要记住的记忆，忠于原文、不编造，只输出严格的 JSON。' },
-    { role: 'user', content: compressPrompt }
-  ], { 
-    useHelperAI: true, // 关键：启用辅助AI，不占主AI的Token！
-    purpose: '记忆压缩',
-    temperature: 0.3, 
-    maxTokens: 600 
-  })
-  
-  const raw = result.reply || ''
-  // 解析 JSON 拿到 summary + content；解析失败则回退为纯文本（summary 留空，发送时回退 content）
-  let content = ''
-  let summary = ''
-  const jsonMatch = raw.match(/\{[\s\S]*\}/)
-  if (jsonMatch) {
-    try {
-      const parsed = JSON.parse(jsonMatch[0])
-      content = String(parsed.content || '').trim()
-      summary = String(parsed.summary || '').trim()
-    } catch {
-      // 解析失败，走下方回退
+    const result = await callAIProvider(null, [
+      { role: 'system', content: '你是恋人 X 的记忆整理助手，负责把对话浓缩成 X 要记住的记忆，忠于原文、不编造，只输出严格的 JSON。' },
+      { role: 'user', content: compressPrompt }
+    ], {
+      useHelperAI: true, // 关键：启用辅助AI，不占主AI的Token！
+      purpose: '记忆压缩',
+      temperature: 0.3,
+      maxTokens: 600
+    })
+
+    const raw = result.reply || ''
+    let content = ''
+    let summary = ''
+    const jsonMatch = raw.match(/\{[\s\S]*\}/)
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0])
+        content = String(parsed.content || '').trim()
+        summary = String(parsed.summary || '').trim()
+      } catch { /* 解析失败走下方回退 */ }
     }
-  }
-  if (!content) content = raw.trim()
+    if (!content) content = raw.trim()
 
-  // 在压缩的同时，抽取喜好/日程为独立的结构化事实记忆（不影响压缩流程）
-  await extractFacts(chatId, messagesText)
+    // 抽取喜好/日程为独立结构化事实记忆（不影响压缩流程）
+    await extractFacts(chatId, messagesText)
 
-  if (content) {
+    if (!content) continue
+
     const emotion = await analyzeEmotion(content)
 
-    const memories = readStorage('memories') || []
-    memories.push({
-      id: `mem-${Date.now()}`,
+    // 归属时间：用当天这批消息里最早一条的时间；缺失则回退到该日期中午。
+    const earliestTs = dayMessages
+      .map(m => Date.parse(m.created_at))
+      .filter(n => Number.isFinite(n))
+      .sort((a, b) => a - b)[0]
+    const createdAtIso = Number.isFinite(earliestTs)
+      ? new Date(earliestTs).toISOString()
+      : new Date(dateStr + 'T12:00:00.000Z').toISOString()
+    const nowIso = new Date().toISOString()
+
+    const memory = {
+      id: `mem-${Date.now()}-${createdMemories.length}`,
       chat_id: chatId,
       content: content,
-      summary: summary || '', // 一句话摘要，检索时优先发给 AI 省 token；为空则回退 content
+      summary: summary || '', // 一句话摘要，检索时优先发给 AI 省 token；为空回退 content
       source: 'compression',
+      tags: ['日常交流'],
       is_active: true,
       is_pinned: false,
       is_resolved: false,
@@ -234,24 +288,29 @@ ${messagesText}
       activation_count: 0,
       valence: emotion.valence || 0.5,
       arousal: emotion.arousal || 0.3,
-      tags: [],
-      date: new Date().toISOString().split('T')[0],
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    writeStorage('memories', memories)
+      date: dateStr, // 归属到对话真实发生的北京日期
+      created_at: createdAtIso, // 与 date 对齐，供日记归属/时间衰减使用
+      updated_at: nowIso,
+    }
 
-    const allMessages = readStorage('messages') || []
-    const messageIdsToDelete = new Set(messagesToCompress.map(m => m.id))
-    const filteredMessages = allMessages.filter(m => !messageIdsToDelete.has(m.id))
-    writeStorage('messages', filteredMessages)
+    // 重新读取最新存储，避免覆盖 extractFacts 刚写入的事实记忆
+    const latestMemories = readStorage('memories') || []
+    latestMemories.push(memory)
+    writeStorage('memories', latestMemories)
 
-    console.log(`记忆压缩完成：${messagesToCompress.length} 条消息 -> 1 条摘要`)
+    // 向量钩子（预留）：为新记忆生成向量，当前默认空操作
+    await onMemoryPersisted(memory)
+
+    createdMemories.push(memory)
+    console.log(`[记忆压缩] ${dateStr}：${dayMessages.length} 条消息 -> 1 条记忆`)
   }
+
+  return createdMemories
 }
 
 module.exports = {
   analyzeEmotion,
   compressMemory,
   extractFacts,
+  beijingDateOf,
 }

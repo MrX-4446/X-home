@@ -6,6 +6,7 @@
 
 const { readStorage, getSetting } = require('../storage')
 const { getRelatedChatIds, calculateTextSimilarity, tokenize } = require('./core')
+const { retrieveByVector, isEmbeddingEnabled } = require('./embedding')
 
 // 粗筛开关：记忆数超过此值才启用「关键词/标签粗筛」，否则全量打分（量小时无需筛）
 const PREFILTER_MIN_TOTAL = 40
@@ -64,6 +65,20 @@ async function surfaceMemoriesEnhanced(chatId, userMessage = '', limit = 10) {
   // 关键词/标签粗筛：先缩小候选集再打分，减少全量遍历与发送量（保底不漏）
   allMemories = prefilterMemories(allMemories, userMessage, limit)
 
+  // 向量检索（预留）：启用 embedding 时，取向量相似度作为语义分来源；未启用返回 null。
+  // 用 Map<memory_id, score> 承接，打分阶段优先用向量分，缺失再回退关键词相似度。
+  let vectorScoreMap = null
+  if (isEmbeddingEnabled() && userMessage && userMessage.length > 5) {
+    try {
+      const hits = await retrieveByVector(userMessage, Math.max(limit * 5, 50))
+      if (Array.isArray(hits)) {
+        vectorScoreMap = new Map(hits.map(h => [h.memory_id, h.score]))
+      }
+    } catch (err) {
+      console.error('[记忆检索] 向量检索失败，回退关键词相似度:', err.message)
+    }
+  }
+
   const decayRate = parseFloat(getSetting('memory_decay_rate') || '0.01')
   const now = new Date()
 
@@ -91,9 +106,15 @@ async function surfaceMemoriesEnhanced(chatId, userMessage = '', limit = 10) {
     // 如果有用户消息，计算与记忆的语义相似度
     let semanticScore = 0.5  // 默认中性分
     if (userMessage && userMessage.length > 5) {
-      semanticScore = calculateTextSimilarity(userMessage, mem.content)
-      // 相似度放大：让语义相关的记忆更容易脱颖而出
-      semanticScore = Math.pow(semanticScore, 0.7)
+      // 优先用向量相似度（启用 embedding 且该记忆有向量时）；否则回退关键词相似度
+      const vscore = vectorScoreMap ? vectorScoreMap.get(mem.id) : undefined
+      if (typeof vscore === 'number') {
+        semanticScore = vscore
+      } else {
+        semanticScore = calculateTextSimilarity(userMessage, mem.content)
+        // 相似度放大：让语义相关的记忆更容易脱颖而出
+        semanticScore = Math.pow(semanticScore, 0.7)
+      }
     }
 
     // 3. 混合总分

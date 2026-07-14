@@ -22,9 +22,26 @@ const db = new Database(DB_PATH)
 db.pragma('journal_mode = WAL')
 db.exec('CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT)')
 
+// ---------- 向量索引表（为将来「记忆向量语义检索」预留，当前默认不写入）----------
+// 一条记忆对应一行：embedding 存为 JSON 数组字符串，dim 记录维度，model 记录生成模型。
+// 现在保持空表；将来接入 embedding 模型后由 lib/memory/embedding.js 负责写入与检索。
+// 这样升级向量检索时业务代码几乎不用动，只在存储层与 embedding 层扩展。
+db.exec(`CREATE TABLE IF NOT EXISTS memory_vectors (
+  memory_id TEXT PRIMARY KEY,
+  embedding TEXT NOT NULL,
+  model TEXT,
+  dim INTEGER,
+  created_at TEXT
+)`)
+
 const _selectStmt = db.prepare('SELECT value FROM kv WHERE key = ?')
 const _upsertStmt = db.prepare('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
 const _keysStmt = db.prepare('SELECT key FROM kv ORDER BY key')
+
+const _vecUpsertStmt = db.prepare('INSERT INTO memory_vectors (memory_id, embedding, model, dim, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(memory_id) DO UPDATE SET embedding = excluded.embedding, model = excluded.model, dim = excluded.dim, created_at = excluded.created_at')
+const _vecGetStmt = db.prepare('SELECT * FROM memory_vectors WHERE memory_id = ?')
+const _vecAllStmt = db.prepare('SELECT * FROM memory_vectors')
+const _vecDelStmt = db.prepare('DELETE FROM memory_vectors WHERE memory_id = ?')
 
 // ---------- 服务器日志记录 ----------
 const serverLogs = []
@@ -63,6 +80,41 @@ function writeStorage(key, data) {
 // 列出所有存储键名（供导出/备份使用，替代原来的读目录列文件）
 function listStorageKeys() {
   return _keysStmt.all().map(r => r.key)
+}
+
+// ---------- 向量索引存取（预留：当前无调用方写入，接入 embedding 后启用）----------
+// 写入/更新某条记忆的向量。embedding 传入数字数组，内部转 JSON 字符串存储。
+function writeMemoryVector(memoryId, embedding, model = null) {
+  if (!memoryId || !Array.isArray(embedding) || embedding.length === 0) return
+  _vecUpsertStmt.run(memoryId, JSON.stringify(embedding), model, embedding.length, new Date().toISOString())
+}
+
+// 读取单条记忆向量，返回 { memory_id, embedding:number[], model, dim, created_at } 或 null。
+function readMemoryVector(memoryId) {
+  const row = _vecGetStmt.get(memoryId)
+  if (!row) return null
+  try {
+    return { ...row, embedding: JSON.parse(row.embedding) }
+  } catch {
+    return null
+  }
+}
+
+// 读取全部记忆向量（供向量检索时全量打分用；数据量大时可在此改为近邻索引）。
+function readAllMemoryVectors() {
+  return _vecAllStmt.all().map(row => {
+    try {
+      return { ...row, embedding: JSON.parse(row.embedding) }
+    } catch {
+      return null
+    }
+  }).filter(Boolean)
+}
+
+// 删除某条记忆的向量（记忆被彻底删除时同步清理）。
+function deleteMemoryVector(memoryId) {
+  if (!memoryId) return
+  _vecDelStmt.run(memoryId)
 }
 
 // ---------- HTTP 响应辅助 + CORS ----------
@@ -130,6 +182,10 @@ module.exports = {
   readStorage,
   writeStorage,
   listStorageKeys,
+  writeMemoryVector,
+  readMemoryVector,
+  readAllMemoryVectors,
+  deleteMemoryVector,
   ALLOWED_ORIGIN,
   CORS_HEADERS,
   sendJson,

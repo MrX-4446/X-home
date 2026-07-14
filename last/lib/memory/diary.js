@@ -9,6 +9,7 @@
 const { readStorage, writeStorage } = require('../storage')
 const { callAIProvider } = require('../ai-provider')
 const { extractFacts } = require('./compress')
+const { onMemoryPersisted } = require('./embedding')
 
 // 获取北京时间的日期字符串 YYYY-MM-DD
 function getBeijingDateStr() {
@@ -147,6 +148,9 @@ ${memoriesText}
       
       writeStorage('memories', updatedMemories)
       
+      // 向量钩子（预留）：为新日记生成向量，当前默认空操作
+      await onMemoryPersisted(newDiary)
+      
       console.log(`[日记整理] 成功！生成了 ${targetDateStr} 的日记`)
       console.log(`[日记整理] 日记摘要: ${diaryResult.reply.trim().substring(0, 150)}...`)
       console.log(`[日记整理] 已自动归档 ${archivedCount} 条用过的记忆（含压缩记忆）`)
@@ -273,6 +277,9 @@ ${diariesText}
       updated.push(newWeekly)
       writeStorage('memories', updated)
 
+      // 向量钩子（预留）：为新周记生成向量，当前默认空操作
+      await onMemoryPersisted(newWeekly)
+
       console.log(`[周记生成] 成功！已归档 ${archivedIds.size} 篇日记`)
       console.log(`[周记生成] 周记摘要: ${weeklyResult.reply.trim().substring(0, 150)}...`)
       console.log(`[周记生成] 周记 ID: ${newWeekly.id}`)
@@ -370,6 +377,9 @@ ${weekliesText}
       updated.push(newMonthly)
       writeStorage('memories', updated)
 
+      // 向量钩子（预留）：为新月记生成向量，当前默认空操作
+      await onMemoryPersisted(newMonthly)
+
       console.log(`[月记生成] 成功！已归档 ${archivedIds.size} 篇周记，月记 ID: ${newMonthly.id}`)
     }
   } catch (err) {
@@ -446,16 +456,27 @@ function setupDailyDiaryTask() {
   console.log(`\n[定时任务] 已启动日记整理定时任务（北京时间 00:00 执行）\n`)
   
   let lastRunDate = null
+  let running = false
   
-  setInterval(() => {
+  setInterval(async () => {
     const now = new Date()
     const beijingTime = new Date(now.getTime() + 8 * 60 * 60 * 1000)
     const todayStr = beijingTime.toISOString().split('T')[0]
     
-    if (isBeijingMidnight() && lastRunDate !== todayStr) {
+    if (isBeijingMidnight() && lastRunDate !== todayStr && !running) {
+      running = true
+      lastRunDate = todayStr // 先占位，防止 60s 内重入并发
       console.log(`\n[定时任务] ===== 到达北京时间 00:00，开始整理日记 =====\n`)
-      compileDailyDiary()
-      lastRunDate = todayStr
+      try {
+        // 先整理昨天（刚跨过的那一天）的日记
+        await compileDailyDiary()
+        // 再回溯补写最近几天「晚到的压缩记忆」对应的、之前漏掉的日记（幂等，已有则跳过）
+        await checkAndBackfillMissingDiaries()
+      } catch (err) {
+        console.error('[定时任务] 日记整理/补写失败:', err.message)
+      } finally {
+        running = false
+      }
     }
   }, 60 * 1000)
 }

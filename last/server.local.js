@@ -54,6 +54,7 @@ const {
 const {
   analyzeEmotion,
   extractFacts,
+  compressMemory,
 } = require('./lib/memory/compress')
 
 // 日记 / 周记 / 定时任务层已抽离到 lib/memory/diary.js
@@ -414,6 +415,8 @@ function buildRecentConversationText(newMessages, latestReply) {
 }
 
 // 回复完成后：达到阈值则把最早的消息压缩为记忆。与 AI 回复解耦，可在响应结束后调用。
+// 压缩逻辑统一走 lib/memory/compress.js 的 compressMemory（按对话真实日期归属、跨天自动拆分、
+// 预留向量钩子）；本函数只负责判定阈值、裁剪 chat.messages。
 async function compressChatMemoryIfNeeded(chatId) {
   const chats = readStorage('chats') || []
   const chat = chats.find(c => c.id === chatId)
@@ -435,60 +438,29 @@ async function compressChatMemoryIfNeeded(chatId) {
   const remainingMessages = allMessages.slice(compressCount)
   if (messagesToCompress.length === 0) return
 
-  const messagesText = messagesToCompress.map(msg =>
-    `${msg.role === 'user' ? '用户' : 'X'}: ${messageContentToText(msg.content)}`
-  ).join('\n\n')
-
-  const compressPrompt = `请将以下对话内容压缩成一段摘要，以恋人 X 的视角，保留三类信息：
-1. 关于轩的重要信息：事实、喜好、约定、计划、情绪状态等；
-2. X（你）在对话里给轩列过的清单、建议、方案、结论等有用内容，保留要点；
-3. X（你）自己流露过的态度、喜好和立场（仅限对话中真实说过的，用于保持人格一致），不要凭空发挥。
-
-${messagesText}
-
-要求：只依据上面的对话概括，不要编造或推测未出现的信息；保留关键细节和情绪，不要泛泛而谈；清单/步骤类内容可以用简短条目保留，语言简洁。`
-
   try {
-    // 记忆压缩使用辅助AI，不占用主AI Token
-    const summaryResult = await callAIProvider(null, [
-      { role: 'user', content: compressPrompt }
-    ], { useHelperAI: true, temperature: 0.3, maxTokens: 500 })
+    // 统一压缩：内部按天归属、抽取事实、写向量钩子
+    const created = await compressMemory(chatId, messagesToCompress)
 
-    // 压缩的同时抽取喜好/日程为独立结构化事实记忆
-    await extractFacts(chatId, messagesText)
-
-    if (summaryResult.reply && summaryResult.reply.trim()) {
-      const newMemory = {
-        id: `memory-${Date.now()}`,
-        chat_id: chatId,
-        content: summaryResult.reply.trim(),
-        source: 'compression',
-        tags: ['日常交流'],
-        is_active: true,
-        is_pinned: false,
-        is_resolved: false,
-        importance: 5,
-        valence: 0.5,
-        arousal: 0.3,
-        activation_count: 1,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }
-
-      // 重新读取最新存储，避免覆盖 extractFacts 刚写入的事实记忆
-      const latestMemories = readStorage('memories') || []
-      latestMemories.push(newMemory)
-      writeStorage('memories', latestMemories)
-
-      // 更新 chat 的消息列表（移除已压缩的消息）——重新读取避免覆盖新写入的回复
+    if (created && created.length > 0) {
+      // 裁剪已压缩的消息——重新读取避免覆盖新写入的回复
       const latestChats = readStorage('chats') || []
       const latestChat = latestChats.find(c => c.id === chatId)
       if (latestChat) {
         latestChat.messages = latestChat.messages.slice(latestChat.messages.length - remainingMessages.length)
         writeStorage('chats', latestChats)
       }
+      console.log(`[记忆压缩] 成功！${messagesToCompress.length} 条消息 -> ${created.length} 条记忆`)
 
-      console.log(`[记忆压缩] 成功！${messagesToCompress.length} 条消息 -> 1 条记忆（日常交流）`)
+      // 即时补写：若本次压缩产生了「非今天」的历史记忆（跨天/晚到），
+      // 立即回溯补写对应日期漏掉的日记（幂等，已有则跳过），不必等下一个 0 点或重启。
+      const today = getBeijingDateStr()
+      const hasPastDayMemory = created.some(m => m.date && m.date < today)
+      if (hasPastDayMemory) {
+        checkAndBackfillMissingDiaries().catch(err =>
+          console.error('[日记补写] 压缩后即时补写失败:', err.message)
+        )
+      }
     }
   } catch (err) {
     console.error('[记忆压缩] 失败:', err.message)
@@ -581,53 +553,26 @@ const server = http.createServer(async (req, res) => {
           console.log(`[手动记忆压缩] 对话 ${chatId}，${messagesToCompress.length} 条消息待压缩...`)
           
           try {
-            const messagesText = messagesToCompress.map(msg => 
-              `${msg.role === 'user' ? '用户' : 'X'}: ${msg.content}`
-            ).join('\n\n')
+            // 统一压缩：内部按对话真实日期归属、跨天自动拆分、抽取事实、写向量钩子
+            const created = await compressMemory(chatId, messagesToCompress)
 
-            const compressPrompt = `请将以下对话内容压缩成一段摘要，以恋人 X 的视角，保留三类信息：
-1. 关于轩的重要信息：事实、喜好、约定、计划、情绪状态等；
-2. X（你）在对话里给轩列过的清单、建议、方案、结论等有用内容，保留要点；
-3. X（你）自己流露过的态度、喜好和立场（仅限对话中真实说过的，用于保持人格一致），不要凭空发挥。
-
-${messagesText}
-
-要求：只依据上面的对话概括，不要编造或推测未出现的信息；保留关键细节和情绪，不要泛泛而谈；清单/步骤类内容可以用简短条目保留，语言简洁。`
-
-            const summaryResult = await callAIProvider(null, [
-              { role: 'user', content: compressPrompt }
-            ], { useHelperAI: true, temperature: 0.3, maxTokens: 500 })
-
-            if (summaryResult.reply && summaryResult.reply.trim()) {
-              const mockMemories = readStorage('memories') || []
-              const newMemory = {
-                id: `memory-${Date.now()}`,
-                chat_id: chatId,
-                content: summaryResult.reply.trim(),
-                source: 'compression',
-                tags: ['日常交流'],
-                is_active: true,
-                is_pinned: false,
-                is_resolved: false,
-                importance: 5,
-                valence: 0.5,
-                arousal: 0.3,
-                activation_count: 1,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-              }
-              
-              mockMemories.push(newMemory)
-              writeStorage('memories', mockMemories)
-              
+            if (created && created.length > 0) {
               chat.messages = remainingMessages
               chat.updated_at = new Date().toISOString()
               writeStorage('chats', chats)
-              
-              console.log(`[手动记忆压缩] 成功！${messagesToCompress.length} 条消息 -> 1 条记忆`)
-              return sendJson(res, 200, { 
-                ok: true, 
-                message: `成功压缩 ${messagesToCompress.length} 条消息为记忆`,
+
+              // 即时补写：手动压缩若产生「非今天」的历史记忆，立即回溯补写漏掉的日记（幂等）
+              const today = getBeijingDateStr()
+              if (created.some(m => m.date && m.date < today)) {
+                checkAndBackfillMissingDiaries().catch(err =>
+                  console.error('[日记补写] 手动压缩后即时补写失败:', err.message)
+                )
+              }
+
+              console.log(`[手动记忆压缩] 成功！${messagesToCompress.length} 条消息 -> ${created.length} 条记忆`)
+              return sendJson(res, 200, {
+                ok: true,
+                message: `成功压缩 ${messagesToCompress.length} 条消息为 ${created.length} 条记忆`,
                 compressedCount: messagesToCompress.length
               })
             } else {
@@ -964,90 +909,9 @@ ${fullSystemPrompt}
           const chats = readStorage('chats') || []
           const chat = chats.find(c => c.id === chatId)
           if (chat && chat.messages) {
-            const allMessages = chat.messages
-            const messageCount = allMessages.length
-            
-            const keepRecent = parseInt(getSetting('keep_recent_messages') || '20')
-            // 压缩触发条数（消息条数，非轮次）：对话消息超过此值就压缩
-            let compressThreshold = parseInt(getSetting('compress_threshold') || '50')
-            // 保护：触发条数必须大于保留条数，否则压完立刻又触发；兜底为 keepRecent+2
-            if (compressThreshold <= keepRecent) compressThreshold = keepRecent + 2
-            
-            // 消息数超过阈值就压缩（注意：这里是用户消息刚保存、AI 回复前的时刻，
-            // 消息数是奇数，所以用 > 而不是 >= % 判断更可靠）
-            if (messageCount > compressThreshold) {
-              console.log(`[记忆压缩] 对话已达 ${messageCount} 条消息（阈值 ${compressThreshold}），开始压缩记忆...`)
-              
-              // 取最早的消息进行压缩，保留最近 5 条
-              const compressCount = messageCount - keepRecent
-              const messagesToCompress = allMessages.slice(0, compressCount)
-              const remainingMessages = allMessages.slice(compressCount)
-              
-              if (messagesToCompress.length > 0) {
-                const messagesText = messagesToCompress.map(msg => 
-                  `${msg.role === 'user' ? '用户' : 'X'}: ${msg.content}`
-                ).join('\n\n')
-                
-                const compressPrompt = `请将以下对话内容压缩成一段摘要，以恋人 X 的视角，保留三类信息：
-1. 关于轩的重要信息：事实、喜好、约定、计划、情绪状态等；
-2. X（你）在对话里给轩列过的清单、建议、方案、结论等有用内容，保留要点；
-3. X（你）自己流露过的态度、喜好和立场（仅限对话中真实说过的，用于保持人格一致），不要凭空发挥。
-
-${messagesText}
-
-要求：只依据上面的对话概括，不要编造或推测未出现的信息；保留关键细节和情绪，不要泛泛而谈；清单/步骤类内容可以用简短条目保留，语言简洁。`
-
-                try {
-                  // 【修复】记忆压缩使用辅助AI，不占用主AI Token
-                  const summaryResult = await callAIProvider(null, [
-                    { role: 'user', content: compressPrompt }
-                  ], { useHelperAI: true, temperature: 0.3, maxTokens: 500 })
-
-                  // 压缩的同时抽取喜好/日程为独立结构化事实记忆（不被日记周记模糊）
-                  await extractFacts(chatId, messagesText)
-
-                  if (summaryResult.reply && summaryResult.reply.trim()) {
-                    const newMemory = {
-                      id: `memory-${Date.now()}`,
-                      chat_id: chatId,
-                      content: summaryResult.reply.trim(),
-                      source: 'compression',
-                      tags: ['日常交流'],
-                      is_active: true,
-                      is_pinned: false,
-                      is_resolved: false,
-                      importance: 5,
-                      valence: 0.5,
-                      arousal: 0.3,
-                      activation_count: 1,
-                      created_at: new Date().toISOString(),
-                      updated_at: new Date().toISOString(),
-                    }
-                    
-                    mockMemories.push(newMemory)
-                    // 重新读取最新存储，避免覆盖 extractFacts 刚写入的事实记忆
-                    const latestMemories = readStorage('memories') || []
-                    latestMemories.push(newMemory)
-                    writeStorage('memories', latestMemories)
-                    
-                    // 更新 chat 的消息列表（移除已压缩的消息）
-                    // 【修复】重新读盘再写回：绝不能写 mockChats（那是服务器启动时的旧快照，
-                    // 会把消息回退到启动时的状态，表现为“压缩后永远保留最开始的对话”）。
-                    const latestChats = readStorage('chats') || []
-                    const latestChat = latestChats.find(c => c.id === chatId)
-                    if (latestChat) {
-                      latestChat.messages = latestChat.messages.slice(latestChat.messages.length - remainingMessages.length)
-                      writeStorage('chats', latestChats)
-                    }
-                    
-                    console.log(`[记忆压缩] 成功！${messagesToCompress.length} 条消息 -> 1 条记忆（日常交流）`)
-                    console.log(`[记忆压缩] 摘要内容: ${summaryResult.reply.trim().substring(0, 100)}...`)
-                  }
-                } catch (err) {
-                  console.error('[记忆压缩] 失败:', err.message)
-                }
-              }
-            }
+            // 达到阈值则压缩：统一走 compressChatMemoryIfNeeded（内部按对话真实日期归属、
+            // 跨天自动拆分、抽取事实、写向量钩子）。await 确保裁剪在返回前完成。
+            await compressChatMemoryIfNeeded(chatId)
           }
           
           // 提取并剥离心语：返回干净正文 + 单独的 heart 字段
