@@ -1069,7 +1069,7 @@ ${fullSystemPrompt}
 
     if (pathname.match(/\/api\/ai-providers\/(.+)\/test/) && req.method === 'POST') {
       const id = pathname.split('/')[3]
-      const provider = mockAIProviders.find(p => p.id === id)
+      const provider = mockAIProviders.find(p => String(p.id) === String(id))
       
       if (!provider) {
         return sendJson(res, 404, { ok: false, error: 'AI 配置不存在' })
@@ -1082,7 +1082,7 @@ ${fullSystemPrompt}
     if (pathname.match(/\/api\/ai-providers\/.+/) && req.method === 'PATCH') {
       const id = pathname.split('/')[3]
       const updates = await readBody(req)
-      const provider = mockAIProviders.find(p => p.id === id)
+      const provider = mockAIProviders.find(p => String(p.id) === String(id))
       if (provider) {
         // apiKey 单独处理：前端字段名是 apiKey，存储/调用读的是 _apiKeyPlain。
         // 留空或占位符（******）表示「不修改现有 Key」，避免编辑其它字段时误清空密钥。
@@ -1098,7 +1098,7 @@ ${fullSystemPrompt}
 
     if (pathname.match(/\/api\/ai-providers\/.+/) && req.method === 'DELETE') {
       const id = pathname.split('/')[3]
-      const index = mockAIProviders.findIndex(p => p.id === id)
+      const index = mockAIProviders.findIndex(p => String(p.id) === String(id))
       if (index !== -1) mockAIProviders.splice(index, 1)
       writeStorage('ai-providers', mockAIProviders)
       return sendJson(res, 200, { ok: true })
