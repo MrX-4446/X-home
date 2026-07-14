@@ -338,6 +338,44 @@ async function recordTurnAndMaybeUpdate(conversationText) {
   }
 }
 
+// ---------- 手动抽取：从对话历史中强制提取画像（不计入轮次，用于补全历史） ----------
+// conversationText: 对话文本，格式为 "轩: xxx\nX: xxx"
+// 返回：{ ok, addedCount, totalCount, items }
+async function extractFromConversation(conversationText) {
+  const state = readPortrait()
+
+  if (!conversationText || !conversationText.trim()) {
+    return { ok: false, error: '对话文本不能为空' }
+  }
+
+  try {
+    const rawItems = await extractPortraitItems(conversationText, state.items)
+
+    if (rawItems === null) {
+      return { ok: false, error: 'AI 抽取失败，无法解析返回结果' }
+    }
+
+    const valid = rawItems.map(validateItem).filter(Boolean).slice(0, MAX_NEW_PER_RUN)
+
+    if (valid.length === 0) {
+      return { ok: true, addedCount: 0, totalCount: state.items.length, items: [], message: '未提取到新的画像内容' }
+    }
+
+    state.fails = 0
+    state.lastRunAt = new Date().toISOString()
+    let list = mergeIntoPortrait(state.items, valid)
+    list = applyForgetting(list)
+    state.items = list
+    writePortrait(state)
+
+    console.log(`[自我画像] 手动抽取完成：新增/印证 ${valid.length} 条，当前共 ${list.length} 条`)
+    return { ok: true, addedCount: valid.length, totalCount: list.length, items: valid }
+  } catch (err) {
+    console.error('[自我画像] 手动抽取失败:', err.message)
+    return { ok: false, error: err.message }
+  }
+}
+
 // ---------- 面板：读取当前画像（供前端展示 stable / recent 两组） ----------
 function listPortrait() {
   const { items, turns, fails, lastRunAt } = readPortrait()
@@ -407,6 +445,7 @@ function deletePortraitItem(id) {
 module.exports = {
   buildSelfPortraitContext,
   recordTurnAndMaybeUpdate,
+  extractFromConversation,
   listPortrait,
   addPortraitItem,
   updatePortraitItem,

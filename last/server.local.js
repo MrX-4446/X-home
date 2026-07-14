@@ -77,6 +77,7 @@ const {
 const {
   buildSelfPortraitContext,
   recordTurnAndMaybeUpdate,
+  extractFromConversation,
   listPortrait,
   addPortraitItem,
   updatePortraitItem,
@@ -1613,6 +1614,18 @@ ${fullSystemPrompt}
       return sendJson(res, 200, { ok: true, removed: result.removed })
     }
 
+    // 手动抽取：从对话历史中强制提取画像（不计入轮次，用于补全历史）
+    if (pathname === '/api/self-portrait/extract' && req.method === 'POST') {
+      const body = await readBody(req)
+      const { conversationText } = body
+      if (!conversationText || !conversationText.trim()) {
+        return sendJson(res, 400, { error: 'conversationText 不能为空' })
+      }
+      const result = await extractFromConversation(conversationText)
+      if (!result.ok) return sendJson(res, 500, { error: result.error })
+      return sendJson(res, 200, { data: result })
+    }
+
     // ===== 数据体积 / 画像统计（只读，供「数据体积」面板展示） =====
     if (pathname === '/api/stats' && req.method === 'GET') {
       const storage = getStorageStats()
@@ -1741,6 +1754,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('  GET/POST /api/shift, GET/PUT /api/shift-types  (排班表)')
   console.log('  GET /api/desire/state, POST /api/desire/feed  (欲望驱动系统)')
   console.log('  GET/POST/PATCH/DELETE /api/self-portrait  (自我画像层)')
+  console.log('  POST /api/self-portrait/extract  (手动抽取画像)')
 
   setupDailyDiaryTask()
   setupProactiveTask()
