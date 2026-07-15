@@ -12,10 +12,10 @@ const { surfaceMemoriesEnhanced } = require('./surface')
 const { sendPush } = require('../push')
 
 // ========== 可调参数 ==========
-const CHECK_INTERVAL_MS = 60 * 60 * 1000 // 每 1 小时扫描一次
-const COOLDOWN_HOURS = 3                 // 距上一条消息不足 N 小时则跳过
+const CHECK_INTERVAL_MS = 30 * 60 * 1000 // 每 30 分钟扫描一次
+const COOLDOWN_HOURS = 1.5               // 距上一条「主动消息」不足 N 小时则跳过
 const HIT_PROBABILITY = 0.15             // 满足条件后命中概率
-const DAILY_LIMIT = 5                    // 每个会话每天最多主动消息数
+const DAILY_LIMIT = 8                    // 每个会话每天最多主动消息数
 const ACTIVE_HOUR_START = 7              // 活跃时段起（北京时间，含）
 const ACTIVE_HOUR_END = 23               // 活跃时段止（北京时间，不含）
 
@@ -41,10 +41,17 @@ function shouldSendProactive(chat) {
 
   const now = Date.now()
 
-  // 1) 冷静期：距最后一条消息不足 COOLDOWN_HOURS 小时则跳过
-  const lastMsg = messages[messages.length - 1]
-  const lastTime = new Date(lastMsg.created_at || 0).getTime()
-  if (now - lastTime < COOLDOWN_HOURS * 60 * 60 * 1000) return false
+  // 1) 冷静期：距「上一条主动消息」不足 COOLDOWN_HOURS 小时则跳过。
+  //    只看主动消息（proactive），这样用户正常聊天不会阻塞 AI 主动冒头，
+  //    让欲望系统的进度条能被更规律地满足回落。从没发过主动消息 → 视为已冷静。
+  let lastProactiveTime = 0
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].proactive) {
+      lastProactiveTime = new Date(messages[i].created_at || 0).getTime()
+      break
+    }
+  }
+  if (lastProactiveTime && now - lastProactiveTime < COOLDOWN_HOURS * 60 * 60 * 1000) return false
 
   // 2) 每日上限：统计今天（北京时间）已发出的主动消息数
   const beijingTodayStr = getBeijingNow().toISOString().split('T')[0]

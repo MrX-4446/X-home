@@ -16,8 +16,11 @@ const FIXATION_FEED_GAIN = 0.18    // 反哺时给关联驱动条的增量
 const FIXATION_RESOLVE_FEEDS = 3   // 执念反哺满 N 次 → 了却出池（防执念永生堆积）
 const DROP_BELOW = 0.06            // 闪念强度低于此值 → 清出池
 const FIXATION_DRIVE_BOOST = 0.35  // 召唤力里执念对关联驱动条的加权系数
-const FATIGUE_REST_GATE = 0.72     // fatigue 过此闸 → 不硬找事，直接歇着
-const FIXATION_SELF_RELAX = 0.7    // 执念反哺后自身松一档的系数
+const FATIGUE_REST_GATE = 0.72    // fatigue 过此闸 → 不硬找事，直接歇着
+const FATIGUE_REST_RECOVER = 0.82 // 休息态（fatigue 已过闸）每拍乘性回落系数：
+                                   // 模拟"歇着就在恢复"，让 fatigue 能自然降回闸下，
+                                   // 避免只增不减而永久锁死整个欲望系统（进度条再也不回落）。
+const FIXATION_SELF_RELAX = 0.7  // 执念反哺后自身松一档的系数
 
 // ========== 八维驱动条 ==========
 // 顺序即遍历顺序；fatigue 是抑制项/闸，不作为召唤事件的正向维度。
@@ -119,11 +122,21 @@ function normalizeThoughts(thoughts) {
 
 // ========== 驱动条缓动 ==========
 // 每拍让各维「缺口」按渐近方式自然累积（越满涨越慢）。
+// fatigue 特殊：一旦越过休息闸（FATIGUE_REST_GATE），说明 X 已进入"歇着"状态，
+// 此时改为乘性回落（模拟休息带来的恢复），使其能自然降回闸下、解除系统锁死；
+// 未过闸时才照常累积"疲惫缺口"。
 // 返回新的 drive，不修改入参。
 function driveTick(drive) {
   const d = normalizeDrive(drive)
   const out = {}
   for (const k of DRIVE_KEYS) {
+    if (k === 'fatigue') {
+      // 已过闸 → 休息态回落；未过闸 → 继续累积
+      out[k] = d[k] >= FATIGUE_REST_GATE
+        ? clamp01(d[k] * FATIGUE_REST_RECOVER)
+        : clamp01(d[k] + DRIVE_GROWTH.fatigue * (1 - d[k]))
+      continue
+    }
     const rate = DRIVE_GROWTH[k] || 0.03
     out[k] = clamp01(d[k] + rate * (1 - d[k]))
   }

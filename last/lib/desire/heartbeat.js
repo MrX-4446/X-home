@@ -13,17 +13,17 @@ const { generateProactiveMessage } = require('../memory/proactive')
 const { generateTeaseMessage } = require('./tease')
 const state = require('./state')
 
-// 与主动消息任务同频：每小时推进一拍
-const TICK_INTERVAL_MS = 60 * 60 * 1000
-const COOLDOWN_HOURS = 3      // 距上一条消息不足 N 小时则不主动冒头
-const DAILY_LIMIT = 5         // 每个会话每天主动消息上限（与随机想念共享计数）
+// 与主动消息任务同频：每 30 分钟推进一拍
+const TICK_INTERVAL_MS = 30 * 60 * 1000
+const COOLDOWN_HOURS = 1.5    // 距上一条「主动消息」不足 N 小时则不主动冒头
+const DAILY_LIMIT = 8         // 每个会话每天主动消息上限（与随机想念共享计数）
 const ACTIVE_HOUR_START = 7   // 活跃时段起（北京时间，含）
 const ACTIVE_HOUR_END = 23    // 活跃时段止（北京时间，不含）
 
 // tease（libido）独立、更克制的频控：冷静期更长、每日上限更低，
 // 避免高频黏人骚扰（对齐方案第六节 libido 风控）。
-const TEASE_COOLDOWN_HOURS = 6 // 距上一条 tease 不足 N 小时则不再撩
-const TEASE_DAILY_LIMIT = 2    // 每个会话每天 tease 上限
+const TEASE_COOLDOWN_HOURS = 3 // 距上一条 tease 不足 N 小时则不再撩
+const TEASE_DAILY_LIMIT = 4    // 每个会话每天 tease 上限
 
 function getBeijingNow() {
   return new Date(Date.now() + 8 * 60 * 60 * 1000)
@@ -80,7 +80,8 @@ function countTodayProactive(messages, kind = null) {
 }
 
 // 距上一条「指定类型」主动消息的间隔是否已过冷静期。
-// kind 为 null 时看最后一条任意消息（通用冷静期）。
+// kind 为 null 时看最后一条「任意主动消息」（通用冷静期，不看用户消息，
+// 避免用户正常聊天阻塞 X 主动冒头，使欲望进度条能被更规律地满足回落）。
 function cooledDown(messages, hours, kind = null) {
   const now = Date.now()
   let lastTime = 0
@@ -94,8 +95,14 @@ function cooledDown(messages, hours, kind = null) {
     }
     if (!lastTime) return true // 从没发过该类型 → 视为已冷静
   } else {
-    const lastMsg = messages[messages.length - 1]
-    lastTime = new Date(lastMsg.created_at || 0).getTime()
+    // 找最后一条「任意主动消息」的时间
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].proactive) {
+        lastTime = new Date(messages[i].created_at || 0).getTime()
+        break
+      }
+    }
+    if (!lastTime) return true // 从没发过主动消息 → 视为已冷静
   }
   return now - lastTime >= hours * 60 * 60 * 1000
 }
