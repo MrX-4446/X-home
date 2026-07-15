@@ -5,7 +5,7 @@
 // =============================================================
 
 const { readStorage, writeStorage } = require('../storage')
-const { defaultAIProviders, callAIProvider } = require('../ai-provider')
+const { callAIProvider } = require('../ai-provider')
 const { onMemoryPersisted } = require('./embedding')
 const { calculateTextSimilarity } = require('./core')
 
@@ -26,13 +26,10 @@ function beijingDateOf(time) {
 // ========== 情感分析自动打标 ==========
 async function analyzeEmotion(content) {
   try {
-    let providers = readStorage('ai-providers')
-    if (!providers || providers.length === 0) {
-      providers = defaultAIProviders
-    }
+    const providers = readStorage('ai-providers') || []
     const enabledProviders = providers.filter(p => p.enabled).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
 
-    if (!enabledProviders || enabledProviders.length === 0) {
+    if (enabledProviders.length === 0) {
       return { valence: 0.5, arousal: 0.3, importance: 5 }
     }
 

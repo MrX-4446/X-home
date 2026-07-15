@@ -14,9 +14,6 @@ function ChatArea({
   streamingText,
   streamingReasoning,
   onStopGenerating,
-  selectedModel,
-  models,
-  onModelChange,
   messagesEndRef,
   onOpenSidebar,
   onGoHome,
@@ -231,9 +228,6 @@ function ChatArea({
         onSend={onSend}
         onKeyPress={onKeyPress}
         isTyping={isTyping}
-        selectedModel={selectedModel}
-        models={models}
-        onModelChange={onModelChange}
       />
     </div>
   )

@@ -610,5 +610,90 @@
   gap: 8px;
 }
 
+/* ---------- 移动端适配 ---------- */
+@media (max-width: 768px) {
+  /* 顶部导航：标题不再占固定宽度，「今天」换行时也不挤压 */
+  .cal-nav {
+    gap: 6px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  .cal-nav-title {
+    min-width: 0;
+    flex: 1;
+    font-size: 15px;
+  }
+  .cal-nav-btn {
+    width: 30px;
+    height: 30px;
+  }
+
+  /* 格子：缩小间距与字号，避免农历/班次/角标在小方格里互相重叠 */
+  .cal-grid {
+    gap: 2px;
+  }
+  .cal-weekday {
+    font-size: 11px;
+  }
+  .cal-cell {
+    border-radius: 6px;
+  }
+  .cal-day-num {
+    font-size: 13px;
+  }
+  .cal-lunar-text {
+    font-size: 8px;
+  }
+  /* 班次标记移到顶部并缩小，纪念日心号收进右上角，日程数字角标缩小 */
+  .cal-shift-badge {
+    top: 1px;
+    padding: 0 3px;
+    font-size: 8px;
+  }
+  .cal-anni-badge {
+    top: 1px;
+    right: 2px;
+    font-size: 8px;
+  }
+  .cal-dot {
+    bottom: 2px;
+    min-width: 13px;
+    height: 13px;
+    line-height: 13px;
+    font-size: 9px;
+    padding: 0 2px;
+  }
+  .cal-cell.has-event:not(.today) .cal-dot:empty {
+    width: 5px;
+    min-width: 5px;
+    height: 5px;
+    bottom: 4px;
+  }
+
+  /* 批量排班条：竖排更好点 */
+  .cal-batch-bar {
+    gap: 6px;
+  }
+  .cal-batch-hint {
+    min-width: 100%;
+  }
+
+  /* 弹窗表单：日期/时间两列在窄屏改为单列，避免溢出 */
+  .cal-field-row {
+    flex-direction: column;
+    gap: 0;
+  }
+}
+
+/* 超窄屏（小手机）进一步压缩，防止个别月份 6 行时溢出 */
+@media (max-width: 360px) {
+  .cal-day-num {
+    font-size: 12px;
+  }
+  .cal-lunar-text {
+    font-size: 7px;
+  }
+}
+
 
 

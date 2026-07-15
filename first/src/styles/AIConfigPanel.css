@@ -329,6 +329,13 @@
   opacity: 1;
 }
 
+/* 触摸设备无 hover：删除按钮常驻显示，否则永远点不到 */
+@media (hover: none) {
+  .delete-ai-btn {
+    opacity: 1;
+  }
+}
+
 .delete-ai-btn:hover {
   background-color: rgba(239, 68, 68, 0.1);
   color: #ef4444;
@@ -517,5 +524,66 @@ select.ai-form-input option:first-child {
 .ai-config-btn:hover {
   background-color: rgba(122, 138, 153, 0.1);
   border-color: var(--primary-warm-gray-blue);
+}
+
+/* ---------- 移动端适配 ---------- */
+@media (max-width: 768px) {
+  .ai-config-panel {
+    width: 94%;
+    max-height: 90vh;
+  }
+  .ai-config-content {
+    padding: 16px;
+    max-height: calc(90vh - 120px);
+  }
+
+  /* AI 条目改为纵向堆叠，信息与操作各占一行，避免长 URL / ID 挤压按钮 */
+  .ai-item {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding: 14px;
+  }
+  .ai-item-left {
+    align-items: flex-start;
+  }
+  .ai-info {
+    flex: 1;
+    min-width: 0;
+  }
+  .ai-name {
+    word-break: break-word;
+  }
+  .ai-endpoint {
+    word-break: break-all;
+  }
+  .ai-id-row {
+    flex-wrap: wrap;
+  }
+  .ai-id-copy {
+    max-width: 100%;
+    word-break: break-all;
+    text-align: left;
+    white-space: normal;
+  }
+
+  /* 操作按钮：整行靠右，点击区更大，删除按钮常驻（触摸设备无 hover） */
+  .ai-item-actions {
+    justify-content: flex-end;
+    gap: 10px;
+  }
+  .test-ai-btn {
+    padding: 8px 14px;
+    font-size: 13px;
+  }
+  .delete-ai-btn {
+    opacity: 1;
+    font-size: 18px;
+    padding: 8px;
+  }
+
+  .ai-form-actions {
+    flex-direction: column;
+  }
 }
 

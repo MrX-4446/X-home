@@ -18,7 +18,6 @@ function ChatHeader({ onOpenSidebar, onGoHome, chatName, chatAvatar, chatTitle, 
         </div>
       </div>
       <div className="header-right">
-        <button className="header-btn">记忆</button>
         <button className="header-btn" onClick={onOpenSettings}>设置</button>
       </div>
     </div>

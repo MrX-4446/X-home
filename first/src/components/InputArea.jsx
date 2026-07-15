@@ -1,5 +1,4 @@
 import { useRef, useState } from 'react'
-import CustomSelect from './CustomSelect'
 import { parseDocumentFile, isSupportedDocFile } from '../lib/docParser'
 
 // 单条消息最多携带的图片数量（多模态模型对图片数量普遍有上限，且太多会撑爆 token）
@@ -46,9 +45,6 @@ function InputArea({
   setInputValue,
   onSend,
   isTyping,
-  selectedModel,
-  models,
-  onModelChange,
 }) {
   const textareaRef = useRef(null)
   const fileInputRef = useRef(null)
@@ -284,14 +280,6 @@ function InputArea({
         >
           →
         </button>
-      </div>
-      <div className="model-selector">
-        <CustomSelect
-          label="模型"
-          value={selectedModel}
-          options={models}
-          onChange={onModelChange}
-        />
       </div>
     </div>
   )

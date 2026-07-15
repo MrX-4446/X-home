@@ -24,9 +24,8 @@ const {
   CORS_HEADERS,
 } = require('./lib/storage')
 
-// AI 提供商层（默认配置 / 连接测试 / API 调用 / Token 估算）已抽离到 lib/ai-provider.js
+// AI 提供商层（连接测试 / API 调用 / Token 估算）已抽离到 lib/ai-provider.js
 const {
-  defaultAIProviders,
   testAIProvider,
   callAIProvider,
   callAIProviderStream,
@@ -193,13 +192,8 @@ function normalizeChatsMessages(chats) {
 // Mock 数据
 const mockChats = readStorage('chats') || []
 
-// 默认AI提供商配置 defaultAIProviders 已移至 lib/ai-provider.js
-
-// 读取本地存储，如果为空或空数组则使用默认配置
-let mockAIProviders = readStorage('ai-providers')
-if (!mockAIProviders || mockAIProviders.length === 0) {
-  mockAIProviders = defaultAIProviders
-}
+// 读取本地存储的AI提供商配置（通过前端「设置」→「AI接入」管理）
+let mockAIProviders = readStorage('ai-providers') || []
 const mockMemories = readStorage('memories') || []
 const mockTools = readStorage('tools') || [
   { id: 'tool-1', name: '网页搜索', description: '实时搜索互联网信息', iconKey: '搜索', enabled: true, category: '搜索', type: 'cloud' },

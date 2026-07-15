@@ -10,36 +10,12 @@ const { readStorage, getSetting } = require('./storage')
 // 该变量的值 = 已在 AI 配置里添加并启用的某个接入的 id。
 // 未来要加新角色（如任务模型）、或更换某个副/主模型，只需改配置与此表，业务代码不动。
 const AI_ROLE_ENV = {
+  main: 'MAIN_AI_PROVIDER_ID',     // 主聊天模型：前端不再选，由此环境变量固定
   helper: 'HELPER_AI_PROVIDER_ID', // 辅助模型：记忆压缩 / 事实抽取等后台任务
   vision: 'VISION_AI_PROVIDER_ID', // 视觉模型：读图 → 文字描述
   task: 'TASK_AI_PROVIDER_ID',     // 任务模型（预留）：搜索/比价/代码等「任务简报」执行者。
                                    // 端口已通：配好 TASK_AI_PROVIDER_ID 并用 callAIProvider(.., { role:'task' }) 即可启用。
 }
-
-// ---------- 默认 AI 提供商配置（本地存储为空时使用） ----------
-const defaultAIProviders = [
-  {
-    id: 1,
-    name: '火山方舟 DeepSeek（主AI - 对话专用）',
-    provider: 'volcengine',
-    model: process.env.ARK_MODEL || 'ep-20250000000000-xxxxx',
-    endpoint: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
-    enabled: true,
-    created_at: new Date().toISOString(),
-    _apiKeyPlain: process.env.ARK_API_KEY || '',
-  },
-  {
-    id: 2,
-    name: '火山方舟 辅助AI（记忆压缩专用）',
-    provider: 'volcengine',
-    model: process.env.HELPER_AI_MODEL || process.env.ARK_MODEL || 'ep-20250000000000-xxxxx',
-    endpoint: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
-    enabled: true,
-    created_at: new Date().toISOString(),
-    _apiKeyPlain: process.env.ARK_API_KEY || '',
-    description: '专门用于记忆压缩、关键词提取等后台任务，可使用低成本模型'
-  }
-]
 
 // ---------- AI 连接测试 ----------
 async function testAIProvider(provider) {
@@ -114,12 +90,11 @@ function resolveProviderAndKey(provider, useHelperAI, role = null) {
   // 兼容旧调用：useHelperAI 为 true 时视为 helper 角色
   const targetRole = role || (useHelperAI ? 'helper' : null)
 
-  let storedProviders = readStorage('ai-providers')
-  // 如果存储为空或空数组，使用默认配置
-  if (!storedProviders || storedProviders.length === 0) {
-    storedProviders = defaultAIProviders
-  }
+  let storedProviders = readStorage('ai-providers') || []
   const enabledProviders = storedProviders.filter(p => p.enabled)
+  if (enabledProviders.length === 0) {
+    throw new Error('未配置任何AI提供商，请在前端「设置」→「AI接入」中添加并启用AI配置')
+  }
   let aiProvider = null
 
   if (targetRole) {
@@ -146,7 +121,17 @@ function resolveProviderAndKey(provider, useHelperAI, role = null) {
       throw new Error(`主聊天AI配置不可用或未启用：${providerId}`)
     }
   } else {
-    aiProvider = enabledProviders[0]
+    // 未指定 provider（前端已移除模型选择器）：优先用环境变量固定的主AI，
+    // 未配置 MAIN_AI_PROVIDER_ID 时回退启用列表的第一个。
+    const mainId = process.env[AI_ROLE_ENV.main]
+    if (mainId) {
+      aiProvider = enabledProviders.find(p => String(p.id) === String(mainId))
+      if (!aiProvider) {
+        throw new Error(`主聊天AI配置不可用：${AI_ROLE_ENV.main}=${mainId}（该 id 未在「AI接入」中启用）`)
+      }
+    } else {
+      aiProvider = enabledProviders[0]
+    }
   }
 
   if (!aiProvider) {
@@ -605,7 +590,6 @@ function estimateMessagesTokens(messages) {
 }
 
 module.exports = {
-  defaultAIProviders,
   testAIProvider,
   callAIProvider,
   callAIProviderStream,

@@ -56,7 +56,6 @@ function App() {
   const [chats, setChats] = useState([])
   const [currentChatId, setCurrentChatId] = useState(null)
   const [inputValue, setInputValue] = useState('')
-  const [selectedModel, setSelectedModel] = useState('model-1')
   const [isTyping, setIsTyping] = useState(false)
   // 流式回复中正在生成的文本（AI 未写库前，用于实时展示打字机效果）
   const [streamingText, setStreamingText] = useState('')
@@ -130,10 +129,6 @@ function App() {
     const providers = await getAIProviders()
     if (providers.length > 0) {
       setAIList(providers)
-      if (!providers.some(provider => provider.id === selectedModel && provider.enabled)) {
-        const firstEnabled = providers.find(provider => provider.enabled)
-        if (firstEnabled) setSelectedModel(firstEnabled.id)
-      }
     }
   }
 
@@ -392,7 +387,6 @@ function App() {
         chatId: chatId,
         system: settings.system_prompt || '',
         messages: messagesForAI,
-        model: selectedModel,
         temperature: parseFloat(settings.temperature) || aiConfig.temperature,
         maxTokens: parseInt(settings.max_tokens) || aiConfig.maxTokens,
         topP: parseFloat(settings.top_p) || aiConfig.topP,
@@ -586,9 +580,6 @@ function App() {
             streamingText={streamingText}
             streamingReasoning={streamingReasoning}
             onStopGenerating={handleStopGenerating}
-            selectedModel={selectedModel}
-            models={aiList.filter(ai => ai.enabled)}
-            onModelChange={setSelectedModel}
             messagesEndRef={messagesEndRef}
             onOpenSidebar={() => setSidebarOpen(!sidebarOpen)}
             onGoHome={() => setCurrentPage('home')}

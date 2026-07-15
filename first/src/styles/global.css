@@ -22,15 +22,23 @@
   --radius-full: 9999px;
 }
 
-/* 夜间主题：只覆盖有色相的变量，其余继承 :root（原始日间配色） */
+/* 夜间主题：暖调深色。背景转深、文字转浅，保留暖灰蓝/灰绿点缀色相 */
 :root[data-theme="night"] {
-  --background-soft: #F4F2EF;
-  --background-card: #EAE6E4;
-  --text-primary: #36404B;
-  --text-secondary: #5E6B78;
-  --text-muted: #9197A0;
-  --border-color: rgba(74, 93, 108, 0.20);
-  --primary-warm-gray-blue-dark: #4A5D6C; /* 用户气泡底色 */
+  --primary-warm-gray: #9C9690;
+  --primary-warm-gray-blue: #8FA1B2;
+  --primary-warm-gray-green: #8C9E90;
+  --primary-warm-gray-dark: #B0AAA3;
+  --primary-warm-gray-blue-dark: #45586a; /* 用户气泡底色 */
+  --primary-warm-gray-green-dark: #5E7061;
+  --background-soft: #1E1B19;   /* 页面底色（暖近黑） */
+  --background-card: #2A2622;   /* 卡片/气泡表面 */
+  --background-warm: #262320;
+  --text-primary: #ECE6DF;
+  --text-secondary: #B7AFA6;
+  --text-muted: #8A837B;
+  --border-color: rgba(255, 255, 255, 0.12);
+  --shadow-soft: 0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-medium: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
 * {
@@ -88,4 +96,53 @@ body {
 html {
   /* 桌面端基准字体 16px */
   font-size: 16px;
+}
+
+/* =============================================================
+   夜间主题：覆盖各组件里硬编码的浅色表面（白底/浅底/浅色渐变）。
+   这些原本写死了 #fff / rgba(255,255,255,..) / 浅色 hex，
+   不跟随 CSS 变量，暗色下必须显式改暗，否则会露出刺眼白块。
+   ============================================================= */
+:root[data-theme="night"] .sidebar {
+  background-color: var(--background-warm);
+}
+:root[data-theme="night"] .home-page {
+  background: linear-gradient(180deg, #1B1816 0%, #232019 100%);
+}
+:root[data-theme="night"] .fullscreen-overlay,
+:root[data-theme="night"] .fullscreen-panel {
+  background-color: var(--background-soft) !important;
+}
+
+/* 输入框 / 下拉 / 卡片等半透明白底 → 半透明浅色叠加，暗色下呈微亮表面 */
+:root[data-theme="night"] .setting-input,
+:root[data-theme="night"] .setting-select,
+:root[data-theme="night"] .ai-form-input,
+:root[data-theme="night"] .custom-select-trigger,
+:root[data-theme="night"] .continue-chat-card {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+:root[data-theme="night"] .custom-select-trigger:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+:root[data-theme="night"] .custom-select-trigger:focus,
+:root[data-theme="night"] .custom-select-trigger.open {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+/* 日程编辑器输入框写死 #fff */
+:root[data-theme="night"] .cal-input {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* 停止生成按钮写死 var(--bg-color,#fff) */
+:root[data-theme="night"] .stop-generating-btn {
+  background: var(--background-card);
+}
+
+/* 半透明白底的软卡片（首页/工具里多处 rgba(255,255,255,.3~.6)） */
+:root[data-theme="night"] .module-card,
+:root[data-theme="night"] .utilities-bar,
+:root[data-theme="night"] .tool-item {
+  background-color: rgba(255, 255, 255, 0.05);
 }
