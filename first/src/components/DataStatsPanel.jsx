@@ -147,7 +147,8 @@ function DataStatsPanel({ onClose }) {
                       <p className="check-message">
                         累计对话轮数：{stats.portrait.meta.turns ?? 0}；
                         自动抽取：{stats.portrait.meta.autoEnabled ? '开启' : '关闭'}；
-                        连续失败：{stats.portrait.meta.fails ?? 0}
+                        连续失败：{stats.portrait.meta.fails ?? 0}；
+                        连续无产出：{stats.portrait.meta.emptyRuns ?? 0}
                         {stats.portrait.meta.lastRunAt ? `；上次更新：${new Date(stats.portrait.meta.lastRunAt).toLocaleString('zh-CN')}` : ''}
                       </p>
                     </div>

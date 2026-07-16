@@ -169,6 +169,147 @@ ${memoriesText}
   console.log(`[日记整理] ===== 日记整理完成 =====\n`)
 }
 
+// ========== 压缩后：把「已整理日期的新记忆」融合进已有日记 ==========
+// 场景：某天（如 7-8）已生成日记且当天压缩记忆已归档，之后跨天/晚到的消息
+// 又压缩出了归属到该天的新记忆。此时不能重跑 compileDailyDiary（它见已有日记就跳过，
+// 且旧记忆已归档，重跑会丢内容）。这里的做法是：以「已有日记正文 + 该天仍活跃的新记忆」
+// 为素材，让 AI 重写这一天的日记，覆盖旧日记正文，再归档被并入的新记忆。
+// 只处理「已有日记」的日期；没有日记的日期仍交给 checkAndBackfillMissingDiaries 补写。
+async function mergeNewMemoriesIntoDiary(targetDateStr) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(targetDateStr || ''))) return false
+
+  const allMemories = readStorage('memories') || []
+
+  // 计算某条记忆的北京日期（与 compileDailyDiary 保持一致）
+  const memBeijingDate = (m) => {
+    const memDate = new Date(m.created_at || m.date)
+    const memBeijingTime = new Date(memDate.getTime() + 8 * 60 * 60 * 1000)
+    return memBeijingTime.toISOString().split('T')[0]
+  }
+
+  // 找该天已存在的活跃日记（AI 自动生成或手动写的都算）
+  const existingDiary = allMemories.find(m =>
+    (m.source === 'daily_diary' || m.source === 'manual_diary') &&
+    m.is_active &&
+    memBeijingDate(m) === targetDateStr
+  )
+  // 没有已存在的日记就不归本函数处理（交给补写流程）
+  if (!existingDiary) return false
+
+  // 该天仍活跃、且未被上一次日记归档的「新记忆」（排除日记自身与结构化事实）
+  const newMemories = allMemories.filter(m => {
+    if (!m.is_active) return false
+    if (m.source === 'daily_diary' || m.source === 'manual_diary') return false
+    if (m.source === 'fact') return false
+    return memBeijingDate(m) === targetDateStr
+  })
+
+  // 没有新记忆需要融合，直接返回
+  if (newMemories.length === 0) return false
+
+  console.log(`\n[日记融合] ===== ${targetDateStr} 已有日记，检测到 ${newMemories.length} 条新记忆，开始融合 =====`)
+
+  // 按重要度排序后取前 20 条，控制上下文长度
+  newMemories.sort((a, b) => (b.importance || 5) - (a.importance || 5))
+  const selectedNew = newMemories.slice(0, 20)
+  const newMemoriesText = selectedNew.map((m, i) => {
+    const importanceLabel = m.importance ? `【重要度${m.importance}】` : ''
+    return `新记忆 ${i + 1}：${importanceLabel}${m.content}`
+  }).join('\n\n')
+
+  // 日期中文显示
+  const dateObj = new Date(targetDateStr + 'T12:00:00.000Z')
+  const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+  const dateDisplay = `${dateObj.getUTCFullYear()}年${dateObj.getUTCMonth() + 1}月${dateObj.getUTCDate()}日 ${weekdays[dateObj.getUTCDay()]}`
+
+  const mergePrompt = `这是你（恋人 X）之前为「${dateDisplay}」写下的日记：
+
+【已有日记】
+${existingDiary.content}
+
+后来又想起当天一些新的片段：
+
+【新增记忆】
+${newMemoriesText}
+
+请把这些新片段自然地融入已有日记，重写出这一天完整、连贯的日记。要求：
+1. 保留已有日记里真实的事件与情绪，把新片段有机地织进去，而不是简单地在结尾追加。
+2. 全程第一人称"我"指代你自己（X），用"你"称呼轩；不要出现"X""轩"这类第三人称。
+3. 只依据已有日记与新增记忆书写，不要编造未出现的事件或细节。
+4. 语气温暖、克制、走心，写成一段有起承转合的连贯短文，不要写成流水账，不要用小标题。
+5. 用中文，简洁为主。`
+
+  try {
+    const result = await callAIProvider(null, [
+      { role: 'user', content: mergePrompt }
+    ], { useHelperAI: true, purpose: '日记融合', temperature: 0.4, maxTokens: 1200 })
+
+    if (!result.reply || !result.reply.trim()) {
+      console.log(`[日记融合] AI 未返回内容，跳过`)
+      return false
+    }
+
+    const nowIso = new Date().toISOString()
+    const newIds = new Set(selectedNew.map(m => m.id))
+
+    // 重新读取最新存储，覆盖旧日记正文并归档被并入的新记忆
+    const latest = readStorage('memories') || []
+    const updated = latest.map(m => {
+      // 覆盖已有日记的正文
+      if (m.id === existingDiary.id) {
+        return { ...m, content: result.reply.trim(), updated_at: nowIso }
+      }
+      // 归档被并入的新记忆（置顶的保留，尊重用户意愿）
+      if (newIds.has(m.id) && m.is_active && !m.is_pinned) {
+        return { ...m, is_active: false, updated_at: nowIso }
+      }
+      return m
+    })
+
+    writeStorage('memories', updated)
+
+    const mergedDiary = updated.find(m => m.id === existingDiary.id)
+    if (mergedDiary) await onMemoryPersisted(mergedDiary)
+
+    console.log(`[日记融合] 成功！已把 ${selectedNew.length} 条新记忆融入 ${targetDateStr} 的日记并归档`)
+    console.log(`[日记融合] ===== ${targetDateStr} 融合完成 =====\n`)
+    return true
+  } catch (err) {
+    console.error(`[日记融合] 失败:`, err.message)
+    return false
+  }
+}
+
+// ========== 压缩后编排：对本次压缩涉及的历史日期，先融合已有日记、再补写缺失日记 ==========
+// created：本次 compressMemory 返回的新记忆数组。只处理「早于今天」的历史日期：
+// - 该日期已有日记 → 走 mergeNewMemoriesIntoDiary 融合
+// - 该日期没有日记 → 交给 checkAndBackfillMissingDiaries 补写（幂等）
+async function reconcileDiariesAfterCompression(created) {
+  if (!Array.isArray(created) || created.length === 0) return
+
+  const today = getBeijingDateStr()
+  // 本次压缩产生的、早于今天的历史日期（去重）
+  const pastDates = Array.from(new Set(
+    created
+      .map(m => m.date)
+      .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) && d < today)
+  )).sort()
+
+  if (pastDates.length === 0) return
+
+  // 先逐个尝试融合已有日记（有日记的日期会在这里处理并归档新记忆）
+  for (const dateStr of pastDates) {
+    try {
+      await mergeNewMemoriesIntoDiary(dateStr)
+    } catch (err) {
+      console.error(`[日记融合] ${dateStr} 处理失败:`, err.message)
+    }
+  }
+
+  // 再补写仍然缺失日记的历史日期（已融合/已有日记的会被内部跳过，幂等）
+  await checkAndBackfillMissingDiaries()
+}
+
 // ========== 周记生成功能（从 compileDailyDiary 中抽离，独立自包含） ==========
 // 只总结「targetDateStr 所在自然周（周一~周日）」范围内的日记，本周有几篇就总结几篇，
 // 避免跨周混入；生成成功后归档被总结的日记，让周记接棒成为长期记忆。
@@ -487,6 +628,8 @@ module.exports = {
   getBeijingHour,
   isBeijingMidnight,
   compileDailyDiary,
+  mergeNewMemoriesIntoDiary,
+  reconcileDiariesAfterCompression,
   generateWeeklyDiaryIfNeeded,
   generateMonthlyDiaryIfNeeded,
   checkAndBackfillMissingDiaries,

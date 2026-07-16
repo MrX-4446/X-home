@@ -64,6 +64,7 @@ const {
   getBeijingDateStr,
   compileDailyDiary,
   checkAndBackfillMissingDiaries,
+  reconcileDiariesAfterCompression,
   setupDailyDiaryTask,
 } = require('./lib/memory/diary')
 
@@ -511,13 +512,14 @@ async function compressChatMemoryIfNeeded(chatId) {
       }
       console.log(`[记忆压缩] 成功！${messagesToCompress.length} 条消息 -> ${created.length} 条记忆`)
 
-      // 即时补写：若本次压缩产生了「非今天」的历史记忆（跨天/晚到），
-      // 立即回溯补写对应日期漏掉的日记（幂等，已有则跳过），不必等下一个 0 点或重启。
+      // 即时补写/融合：若本次压缩产生了「非今天」的历史记忆（跨天/晚到），
+      // 立即对这些历史日期做处理——已有日记的融合进去、没日记的补写（幂等），
+      // 不必等下一个 0 点或重启。
       const today = getBeijingDateStr()
       const hasPastDayMemory = created.some(m => m.date && m.date < today)
       if (hasPastDayMemory) {
-        checkAndBackfillMissingDiaries().catch(err =>
-          console.error('[日记补写] 压缩后即时补写失败:', err.message)
+        reconcileDiariesAfterCompression(created).catch(err =>
+          console.error('[日记融合/补写] 压缩后即时处理失败:', err.message)
         )
       }
     }
@@ -620,11 +622,12 @@ const server = http.createServer(async (req, res) => {
               chat.updated_at = new Date().toISOString()
               writeStorage('chats', chats)
 
-              // 即时补写：手动压缩若产生「非今天」的历史记忆，立即回溯补写漏掉的日记（幂等）
+              // 即时补写/融合：手动压缩若产生「非今天」的历史记忆，立即对这些历史日期做处理
+              // ——已有日记的融合进去、没日记的补写（幂等）
               const today = getBeijingDateStr()
               if (created.some(m => m.date && m.date < today)) {
-                checkAndBackfillMissingDiaries().catch(err =>
-                  console.error('[日记补写] 手动压缩后即时补写失败:', err.message)
+                reconcileDiariesAfterCompression(created).catch(err =>
+                  console.error('[日记融合/补写] 手动压缩后即时处理失败:', err.message)
                 )
               }
 

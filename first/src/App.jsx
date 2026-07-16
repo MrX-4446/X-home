@@ -10,6 +10,7 @@ import AppCheckPanel from './components/AppCheckPanel'
 import CalendarPanel from './components/CalendarPanel'
 import ReadingPartner from './components/ReadingPartner'
 import DesirePanel from './components/DesirePanel'
+import FloatingReadingPanel from './components/FloatingReadingPanel'
 import DataStatsPanel from './components/DataStatsPanel'
 import Sidebar from './components/Sidebar'
 import ChatArea from './components/ChatArea'
@@ -84,6 +85,7 @@ function App() {
   const [readingOpen, setReadingOpen] = useState(false) // 共读伴侣界面
   const [desireOpen, setDesireOpen] = useState(false) // X 的内心（欲望驱动系统）
   const [statsOpen, setStatsOpen] = useState(false) // 数据体积面板
+  const [floatingReadingOpen, setFloatingReadingOpen] = useState(false) // 阅读陪伴悬浮窗
   // 工具列表以后端返回为准（loadTools 会覆盖），
   // 初始置空避免首屏闪现后端未实现的工具
   const [toolList, setToolList] = useState([])
@@ -243,6 +245,7 @@ function App() {
     if (readingOpen) { setReadingOpen(false); return true }
     if (desireOpen) { setDesireOpen(false); return true }
     if (statsOpen) { setStatsOpen(false); return true }
+    if (floatingReadingOpen) { setFloatingReadingOpen(false); return true }
     if (sidebarOpen) { setSidebarOpen(false); return true }
     if (currentPage === 'chat') { setCurrentPage('home'); return true }
     return false
@@ -556,6 +559,7 @@ function App() {
           onOpenCalendar={() => setCalendarOpen(true)}
           onOpenDesire={() => setDesireOpen(true)}
           onOpenStats={() => setStatsOpen(true)}
+          onOpenFloatingReading={() => setFloatingReadingOpen(true)}
         />
       ) : (
         <>
@@ -678,6 +682,13 @@ function App() {
       {statsOpen && (
         <DataStatsPanel
           onClose={() => setStatsOpen(false)}
+        />
+      )}
+
+      {/* 阅读陪伴悬浮窗 */}
+      {floatingReadingOpen && (
+        <FloatingReadingPanel
+          onClose={() => setFloatingReadingOpen(false)}
         />
       )}
     </div>

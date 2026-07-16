@@ -41,16 +41,22 @@ function isAutoEnabled() {
 }
 
 // ---------- 存储读写（归一化为固定结构，避免脏数据） ----------
-// 结构：{ items: [...画像条目], turns: 累计有效对话轮数, fails: 连续失败次数, lastRunAt }
+// 结构：{ items: [...画像条目], turns: 累计有效对话轮数,
+//        fails: 连续「真失败」次数（AI 调不通/返回无法解析），
+//        emptyRuns: 连续「合法返回但内容为空」次数（对话平淡、无新默契，属正常克制），
+//        lastRunAt }
+// 说明：fails 与 emptyRuns 拆开统计——只有真失败才触发告警，避免把"内容平淡的
+//       正常空产出"误报成"抽取故障"。
 function readPortrait() {
   const raw = readStorage(STORAGE_KEY)
   if (!raw || typeof raw !== 'object' || !Array.isArray(raw.items)) {
-    return { items: [], turns: 0, fails: 0, lastRunAt: null }
+    return { items: [], turns: 0, fails: 0, emptyRuns: 0, lastRunAt: null }
   }
   return {
     items: raw.items,
     turns: Number(raw.turns) || 0,
     fails: Number(raw.fails) || 0,
+    emptyRuns: Number(raw.emptyRuns) || 0,
     lastRunAt: raw.lastRunAt || null,
   }
 }
@@ -60,6 +66,7 @@ function writePortrait(state) {
     items: Array.isArray(state.items) ? state.items : [],
     turns: Number(state.turns) || 0,
     fails: Number(state.fails) || 0,
+    emptyRuns: Number(state.emptyRuns) || 0,
     lastRunAt: state.lastRunAt || null,
   })
 }
@@ -300,11 +307,11 @@ async function recordTurnAndMaybeUpdate(conversationText) {
   try {
     const rawItems = await extractPortraitItems(conversationText, state.items)
 
-    // 抽取失败（返回 null）：失败不静默，累计失败次数并提示
+    // 抽取失败（返回 null）：真失败（AI 调不通/返回无法解析），累计 fails 并告警
     if (rawItems === null) {
       state.fails = (state.fails || 0) + 1
       if (state.fails >= FAIL_ALERT_N) {
-        console.warn(`[自我画像] ⚠️ 连续 ${state.fails} 次抽取失败/无产出，画像层近期未更新，请检查辅助AI是否正常。`)
+        console.warn(`[自我画像] ⚠️ 连续 ${state.fails} 次抽取失败，请检查辅助AI是否正常。`)
       }
       writePortrait(state)
       return
@@ -314,17 +321,16 @@ async function recordTurnAndMaybeUpdate(conversationText) {
     const valid = rawItems.map(validateItem).filter(Boolean).slice(0, MAX_NEW_PER_RUN)
 
     if (valid.length === 0) {
-      // 产出为空：正常情况（这段没形成新默契），也计入失败提示以便察觉"长期不长"
-      state.fails = (state.fails || 0) + 1
-      if (state.fails >= FAIL_ALERT_N) {
-        console.warn(`[自我画像] ⚠️ 连续 ${state.fails} 次无有效产出，画像层近期未更新。`)
-      }
+      // 产出为空：正常情况（这段对话平淡、没形成新默契）。单独记 emptyRuns，
+      // 不计入 fails、不报"抽取故障"告警，避免把正常克制误判成系统坏了。
+      state.emptyRuns = (state.emptyRuns || 0) + 1
       writePortrait(state)
       return
     }
 
-    // 成功产出：清零失败计数，合并入库 + 淡出旧的近期状态
+    // 成功产出：清零失败与空产出计数，合并入库 + 淡出旧的近期状态
     state.fails = 0
+    state.emptyRuns = 0
     let list = mergeIntoPortrait(state.items, valid)
     list = applyForgetting(list)
     state.items = list
@@ -362,6 +368,7 @@ async function extractFromConversation(conversationText) {
     }
 
     state.fails = 0
+    state.emptyRuns = 0
     state.lastRunAt = new Date().toISOString()
     let list = mergeIntoPortrait(state.items, valid)
     list = applyForgetting(list)
@@ -378,11 +385,11 @@ async function extractFromConversation(conversationText) {
 
 // ---------- 面板：读取当前画像（供前端展示 stable / recent 两组） ----------
 function listPortrait() {
-  const { items, turns, fails, lastRunAt } = readPortrait()
+  const { items, turns, fails, emptyRuns, lastRunAt } = readPortrait()
   return {
     stable: items.filter(i => i.type === 'stable'),
     recent: items.filter(i => i.type === 'recent'),
-    meta: { turns, fails, lastRunAt, autoEnabled: isAutoEnabled() },
+    meta: { turns, fails, emptyRuns, lastRunAt, autoEnabled: isAutoEnabled() },
   }
 }
 
