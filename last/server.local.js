@@ -52,6 +52,11 @@ const {
   surfaceMemoriesEnhanced,
 } = require('./lib/memory/surface')
 
+// 记忆向量层（语义向量计算 / 存量回填）已抽离到 lib/memory/embedding.js
+const {
+  backfillAllVectors,
+} = require('./lib/memory/embedding')
+
 // 记忆压缩层（情感分析 / 记忆压缩）已抽离到 lib/memory/compress.js
 const {
   analyzeEmotion,
@@ -1230,6 +1235,14 @@ ${fullSystemPrompt}
       if (chatId) memories = memories.filter(m => m.chat_id === chatId || !m.chat_id)
       memories = memories.filter(m => m.is_active)
       return sendJson(res, 200, { data: memories.slice(0, limit) })
+    }
+
+    // POST /api/memory/backfill-vectors  body: { rebuild?: boolean }
+    // 给存量记忆补算向量。rebuild=true 时清空重算（换模型后用）。
+    if (pathname === '/api/memory/backfill-vectors' && req.method === 'POST') {
+      const body = await readBody(req)
+      const result = await backfillAllVectors({ rebuild: !!body.rebuild })
+      return sendJson(res, result.ok ? 200 : 409, result)
     }
 
     if (pathname.match(/\/api\/memories\/.+\/touch/) && req.method === 'POST') {

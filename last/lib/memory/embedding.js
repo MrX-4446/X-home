@@ -17,7 +17,9 @@ const {
   writeMemoryVector,
   readAllMemoryVectors,
   deleteMemoryVector,
+  readStorage,
 } = require('../storage')
+const { resolveProviderAndKey } = require('../ai-provider')
 
 // 总开关：默认关闭。将来接入 embedding 服务后置为 on 即可启用向量能力。
 const EMBEDDING_ENABLED = String(process.env.MEMORY_EMBEDDING || '').toLowerCase() === 'on'
@@ -27,15 +29,44 @@ function isEmbeddingEnabled() {
   return EMBEDDING_ENABLED
 }
 
-// 计算文本向量。当前为占位实现，返回 null 表示「未启用/未实现」。
-// 将来接入 embedding 模型时，在此调用对应 API 并返回 number[]。
+// 计算文本向量。走 embedding 角色接入（EMBEDDING_AI_PROVIDER_ID），OpenAI 兼容格式，
+// 百炼 / 火山方舟通用。未启用或空文本返回 null，调用方据此回退。
 async function computeEmbedding(text) {
   if (!EMBEDDING_ENABLED) return null
-  if (!text || !String(text).trim()) return null
-  // TODO: 接入真实 embedding 模型，例如：
-  //   const resp = await fetch(EMBEDDING_ENDPOINT, { ... })
-  //   return resp.data[0].embedding
-  return null
+  const input = String(text || '').trim()
+  if (!input) return null
+  const { aiProvider, apiKey } = resolveProviderAndKey(null, false, 'embedding')
+  const resp = await fetch(aiProvider.endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: EMBEDDING_MODEL || aiProvider.model,
+      input: input.slice(0, 4000), // 截断，避免超模型输入上限
+    }),
+  })
+  if (!resp.ok) throw new Error(`embedding HTTP ${resp.status}`)
+  const data = await resp.json()
+  return data?.data?.[0]?.embedding || null
+}
+
+// 批量文本 → 向量数组（回填用，省调用次数）。返回与 texts 等长的数组，失败项为 null。
+// 按厂商返回的 data[i].index 对齐，避免顺序错位。
+async function computeEmbeddingsBatch(texts) {
+  if (!EMBEDDING_ENABLED) return texts.map(() => null)
+  const inputs = texts.map(t => String(t || '').trim().slice(0, 4000))
+  const { aiProvider, apiKey } = resolveProviderAndKey(null, false, 'embedding')
+  const resp = await fetch(aiProvider.endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ model: EMBEDDING_MODEL || aiProvider.model, input: inputs }),
+  })
+  if (!resp.ok) throw new Error(`embedding batch HTTP ${resp.status}`)
+  const data = await resp.json()
+  const out = new Array(texts.length).fill(null)
+  for (const item of (data?.data || [])) {
+    if (typeof item.index === 'number') out[item.index] = item.embedding
+  }
+  return out
 }
 
 // 记忆持久化后的统一钩子：所有新记忆（压缩/日记/周记/月记/事实）写库后调用一次。
@@ -79,18 +110,76 @@ async function retrieveByVector(queryText, limit = 10) {
   if (!EMBEDDING_ENABLED) return null
   const qvec = await computeEmbedding(queryText)
   if (!Array.isArray(qvec) || qvec.length === 0) return null
+  const qdim = qvec.length
   const rows = readAllMemoryVectors()
   if (rows.length === 0) return null
-  return rows
+
+  // 保护①：只对同维度向量算余弦。维度不符（换过模型的旧向量）直接跳过，避免串味。
+  const sameDim = rows.filter(r => Array.isArray(r.embedding) && r.embedding.length === qdim)
+  const skipped = rows.length - sameDim.length
+  if (skipped > 0) {
+    console.warn(`[向量检索] 跳过 ${skipped} 条维度不符的旧向量（当前维度 ${qdim}），建议重跑回填统一维度`)
+  }
+  if (sameDim.length === 0) return null
+
+  return sameDim
     .map(r => ({ memory_id: r.memory_id, score: cosine(qvec, r.embedding) }))
     .sort((x, y) => y.score - x.score)
     .slice(0, limit)
 }
 
+// 存量回填：给所有 active 记忆补算向量。幂等——跳过已有向量的记忆，可反复运行 / 中断续跑。
+// 保护②：发现库里已有向量的 model 与当前 EMBEDDING_MODEL 不一致，说明换过模型，
+//   需 rebuild=true 清空重算；否则新旧向量混存会导致维度/语义串味。
+async function backfillAllVectors({ batchSize = 20, rebuild = false } = {}) {
+  if (!EMBEDDING_ENABLED) return { ok: false, reason: 'embedding 未启用' }
+
+  const allRows = readAllMemoryVectors()
+  // 模型一致性检查：库里若有其它模型生成的向量，非 rebuild 模式拒绝混存
+  const otherModel = allRows.find(r => r.model && r.model !== EMBEDDING_MODEL)
+  if (otherModel && !rebuild) {
+    return {
+      ok: false,
+      reason: `检测到库里存在用模型 "${otherModel.model}" 生成的向量，与当前 "${EMBEDDING_MODEL}" 不一致。` +
+              `请用 rebuild=true 清空重算，避免新旧向量混存。`,
+    }
+  }
+
+  if (rebuild) {
+    for (const r of allRows) deleteMemoryVector(r.memory_id)
+    console.log(`[向量回填] rebuild：已清空 ${allRows.length} 条旧向量`)
+  }
+
+  const memories = (readStorage('memories') || []).filter(m => m.is_active)
+  const existing = new Set(readAllMemoryVectors().map(r => r.memory_id))
+  const todo = memories.filter(m => !existing.has(m.id)) // 跳过已算过的
+
+  let done = 0
+  for (let i = 0; i < todo.length; i += batchSize) {
+    const batch = todo.slice(i, i + batchSize)
+    const texts = batch.map(m => m.summary || m.content || '')
+    try {
+      const vecs = await computeEmbeddingsBatch(texts)
+      batch.forEach((m, k) => {
+        if (Array.isArray(vecs[k]) && vecs[k].length > 0) {
+          writeMemoryVector(m.id, vecs[k], EMBEDDING_MODEL)
+          done++
+        }
+      })
+      console.log(`[向量回填] 进度 ${Math.min(i + batchSize, todo.length)}/${todo.length}`)
+    } catch (err) {
+      console.error(`[向量回填] 批次 ${i} 失败（可重跑续算）:`, err.message)
+    }
+  }
+  return { ok: true, total: todo.length, done }
+}
+
 module.exports = {
   isEmbeddingEnabled,
   computeEmbedding,
+  computeEmbeddingsBatch,
   onMemoryPersisted,
   onMemoryDeleted,
   retrieveByVector,
+  backfillAllVectors,
 }

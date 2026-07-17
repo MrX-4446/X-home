@@ -15,6 +15,7 @@ const AI_ROLE_ENV = {
   vision: 'VISION_AI_PROVIDER_ID', // 视觉模型：读图 → 文字描述
   task: 'TASK_AI_PROVIDER_ID',     // 任务模型（预留）：搜索/比价/代码等「任务简报」执行者。
                                    // 端口已通：配好 TASK_AI_PROVIDER_ID 并用 callAIProvider(.., { role:'task' }) 即可启用。
+  embedding: 'EMBEDDING_AI_PROVIDER_ID', // 向量模型：记忆语义向量计算（embedding.js 用它拿 endpoint/key）
 }
 
 // ---------- AI 连接测试 ----------
@@ -597,4 +598,5 @@ module.exports = {
   estimateTokens,
   estimateMessagesTokens,
   stripThinkingTags,
+  resolveProviderAndKey, // 向量层 embedding.js 需要用它拿 endpoint / key
 }
