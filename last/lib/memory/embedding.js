@@ -131,7 +131,8 @@ async function retrieveByVector(queryText, limit = 10) {
 // 存量回填：给所有 active 记忆补算向量。幂等——跳过已有向量的记忆，可反复运行 / 中断续跑。
 // 保护②：发现库里已有向量的 model 与当前 EMBEDDING_MODEL 不一致，说明换过模型，
 //   需 rebuild=true 清空重算；否则新旧向量混存会导致维度/语义串味。
-async function backfillAllVectors({ batchSize = 20, rebuild = false } = {}) {
+// batchSize=10：百炼 text-embedding-v3/v4 单次批量上限就是 10 条，超过会整批 400 失败。
+async function backfillAllVectors({ batchSize = 10, rebuild = false } = {}) {
   if (!EMBEDDING_ENABLED) return { ok: false, reason: 'embedding 未启用' }
 
   const allRows = readAllMemoryVectors()
