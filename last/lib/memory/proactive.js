@@ -104,10 +104,15 @@ async function generateProactiveMessage(chat, options = {}) {
   const sceneHint = options && typeof options.sceneHint === 'string' ? options.sceneHint.trim() : ''
 
   // 拉取相关记忆作为灵感（喜好 / 最近日记等）
+  // 空查询下 surface 按规则分排序，直接取前几条会每次都挑同几条最高重要度记忆，
+  // 导致主动消息老翻同样的旧账。这里取一个更大的候选池再随机采样，让选材更发散。
   let memoryContext = ''
   try {
-    const memories = await surfaceMemoriesEnhanced(chatId, '', 5)
-    if (memories.length > 0) {
+    const pool = await surfaceMemoriesEnhanced(chatId, '', 12)
+    if (pool.length > 0) {
+      // 随机打乱候选池，取前 3 条作为本次灵感
+      const shuffled = pool.slice().sort(() => Math.random() - 0.5)
+      const memories = shuffled.slice(0, 3)
       memoryContext = `\n【关于轩的记忆（供你自然带出，不要生硬罗列）】\n${memories.map((m, i) => `${i + 1}. ${m.content}`).join('\n')}\n`
     }
   } catch (err) {
@@ -116,6 +121,39 @@ async function generateProactiveMessage(chat, options = {}) {
 
   const baseRules = loadBaseRules()
   const userSystemPrompt = getSetting('system_prompt') || ''
+
+  // 最近对话上下文：取该会话最后几条消息作参考，让主动消息能自然接续未聊完的话题。
+  // 距上次聊天较久（超过 CONTEXT_FRESH_HOURS）则不带上下文，避免隔太久还追着旧话题显得突兀。
+  const CONTEXT_FRESH_HOURS = 3   // 最近一条消息在 N 小时内才视为「话题还热」
+  const RECENT_MSG_COUNT = 6      // 参考最近多少条消息
+  let recentContext = ''
+  let topicIsFresh = false
+  try {
+    const msgs = Array.isArray(chat.messages) ? chat.messages : []
+    const lastMsg = msgs[msgs.length - 1]
+    if (lastMsg) {
+      const lastTs = new Date(lastMsg.created_at || 0).getTime()
+      topicIsFresh = lastTs > 0 && (Date.now() - lastTs) < CONTEXT_FRESH_HOURS * 60 * 60 * 1000
+    }
+    if (topicIsFresh) {
+      const toText = (content) => {
+        if (typeof content === 'string') return content
+        if (Array.isArray(content)) {
+          return content.map(p => (typeof p === 'string' ? p : p?.type === 'text' ? (p.text || '') : p?.type === 'image_url' ? '[图片]' : '')).join(' ').trim()
+        }
+        return content == null ? '' : String(content)
+      }
+      const recent = msgs.slice(-RECENT_MSG_COUNT).map(m => {
+        const who = m.role === 'user' ? '轩' : '你'
+        return `${who}：${toText(m.content)}`
+      }).filter(line => line.length > 2)
+      if (recent.length > 0) {
+        recentContext = `\n【最近的对话（供参考，判断是否需要接续）】\n${recent.join('\n')}\n`
+      }
+    }
+  } catch (err) {
+    console.warn('[主动消息] 读取最近对话失败:', err.message)
+  }
 
   const beijingNow = getBeijingNow()
   const hour = beijingNow.getUTCHours()
@@ -127,10 +165,11 @@ async function generateProactiveMessage(chat, options = {}) {
   else if (hour >= 18 && hour < 22) timeOfDay = '晚上'
   else timeOfDay = '深夜'
 
-  const proactivePrompt = `${baseRules ? baseRules + '\n\n' : ''}${userSystemPrompt ? userSystemPrompt + '\n\n' : ''}${memoryContext}
+  const proactivePrompt = `${baseRules ? baseRules + '\n\n' : ''}${userSystemPrompt ? userSystemPrompt + '\n\n' : ''}${memoryContext}${recentContext}
 【当前场景】现在是${timeOfDay}。${sceneHint ? `你（作为恋人X）此刻的心情是：${sceneHint}于是主动发起一条消息找轩。` : '你（作为恋人X）此刻突然想起了轩，于是主动发起一条消息找他聊天。'}
 【要求】
 - 这是你主动发起的对话，不是在回复轩，所以不要出现"你说的""收到"之类回应性措辞。
+${recentContext ? '- 如果上面「最近的对话」还没聊完、话题自然，可以顺着它继续（像想起刚才没说完的事）；如果那个话题已经聊完或不适合再提，就自然开启一个新话题。' : ''}
 - 自然、生活化，像真的想念一个人时随口发的一句话，可以结合上面记忆里的内容或当前时间段。
 - 只输出这一句消息本身，不要任何解释、引号或前后缀。控制在 1~2 句话以内。`
 

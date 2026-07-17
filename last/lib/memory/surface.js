@@ -97,9 +97,15 @@ async function surfaceMemoriesEnhanced(chatId, userMessage = '', limit = 10) {
     const effectiveActivationCount = (mem.activation_count || 0) * activationDecay
 
     // 1. 规则基础分（50%权重）
-    const ruleScore = (mem.importance * 0.4 +
-                       effectiveActivationCount * 0.2 +
-                       emotionIntensity * 0.2 +
+    // 【修复】各分量先归一到 0~1 再加权，使 ruleScore ∈ [0,1]，与 semanticScore(0~1) 同量纲。
+    // 否则 importance(1~10) 会让 ruleScore 量级远超语义分，导致「50%/50%」名不副实、
+    // 语义相关性被淹没——检索几乎只看重要度，冒出与当前话题无关的旧记忆。
+    const importanceNorm = Math.min(Math.max(mem.importance || 0, 0) / 10, 1) // 重要度 1~10 → 0~1
+    const activationNorm = Math.min(effectiveActivationCount / 10, 1)         // 激活次数 → 0~1（截断）
+    const emotionNorm = Math.min(emotionIntensity / Math.SQRT2, 1)            // 情绪强度 → 0~1（√2 为理论上限）
+    const ruleScore = (importanceNorm * 0.4 +
+                       activationNorm * 0.2 +
+                       emotionNorm * 0.2 +
                        decay * 0.2) * resolveBonus
 
     // 2. 语义相似度分（50%权重）

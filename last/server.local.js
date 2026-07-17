@@ -363,11 +363,12 @@ async function prepareChatMessages(chatId, newMessages) {
   const sortedMemories = await surfaceMemoriesEnhanced(chatId, lastUserMessage, 5)
 
   // 语义相关性过滤：只保留与当前对话相关的记忆
-  const RELEVANCE_THRESHOLD = 0.15
+  // ruleScore 归一化后语义分已真正生效，这里提高阈值收紧注入，避免无关旧记忆混入。
+  const RELEVANCE_THRESHOLD = 0.3         // 非置顶记忆：需较强相关才注入
+  const PINNED_RELEVANCE_THRESHOLD = 0.15 // 置顶记忆：过一道弱相关判断，不再无条件注入
   const relevantMemories = sortedMemories.filter(mem => {
-    if (mem.is_pinned) return true
     const relevance = mem.semanticScore || 0
-    return relevance >= RELEVANCE_THRESHOLD
+    return relevance >= (mem.is_pinned ? PINNED_RELEVANCE_THRESHOLD : RELEVANCE_THRESHOLD)
   })
 
   let memoryContext = ''
@@ -868,13 +869,12 @@ const server = http.createServer(async (req, res) => {
           const sortedMemories = await surfaceMemoriesEnhanced(chatId, lastUserMessage, 5)
           
           // 【新增】语义相关性过滤：只保留与当前对话相关的记忆
-          const RELEVANCE_THRESHOLD = 0.15  // 语义相关性阈值，低于此值的记忆将被过滤
+          // ruleScore 归一化后语义分已真正生效，这里提高阈值收紧注入，避免无关旧记忆混入。
+          const RELEVANCE_THRESHOLD = 0.3         // 非置顶记忆：需较强相关才注入
+          const PINNED_RELEVANCE_THRESHOLD = 0.15 // 置顶记忆：过一道弱相关判断，不再无条件注入
           const relevantMemories = sortedMemories.filter(mem => {
-            // 置顶记忆直接通过
-            if (mem.is_pinned) return true
-            // 非置顶记忆需要满足语义相关性阈值
             const relevance = mem.semanticScore || 0
-            return relevance >= RELEVANCE_THRESHOLD
+            return relevance >= (mem.is_pinned ? PINNED_RELEVANCE_THRESHOLD : RELEVANCE_THRESHOLD)
           })
           
           // 构建记忆摘要，并更新被检索到的记忆的激活次数（带衰减）
