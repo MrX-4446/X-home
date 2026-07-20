@@ -4,27 +4,110 @@ import { api, chatWithAI } from '../lib/api'
 import { parseDocumentFile, isSupportedDocFile } from '../lib/docParser'
 
 const PAGE_SIZE = 2000
-const CHAPTER_REGEX = /^\s*(第[零一二两三四五六七八九十百千万0-9]+[章节回卷部])\s*/
+const CHAPTER_PATTERNS = [
+  /^\s*(第[零一二两三四五六七八九十百千万0-9]+[章节回卷部]).*$/,
+  /^\s*(第[零一二两三四五六七八九十百千万0-9]+[部分]).*$/,
+  /^\s*([IVXLCDM]+[\.\s]+.*)$/,
+  /^\s*([0-9]+[\.\s]+.*)$/,
+  /^\s*([第]?[0-9]{1,3}[、\.\s]+.*)$/,
+]
 const MAX_FILE_SIZE_MB = 5
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 const MAX_TEXT_CHARS = 2000000
 
+function highlightText(text, annotations = []) {
+  if (!text) return ''
+  
+  let result = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  
+  if (annotations.length === 0) {
+    return result
+  }
+  
+  const sortedAnnotations = [...annotations].sort((a, b) => b.anchor.length - a.anchor.length)
+  
+  for (const ann of sortedAnnotations) {
+    if (!ann.anchor) continue
+    
+    const escapedAnchor = ann.anchor
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\(/g, '\\(')
+      .replace(/\)/g, '\\)')
+      .replace(/\[/g, '\\[')
+      .replace(/\]/g, '\\]')
+      .replace(/\{/g, '\\{')
+      .replace(/\}/g, '\\}')
+      .replace(/\*/g, '\\*')
+      .replace(/\+/g, '\\+')
+      .replace(/\?/g, '\\?')
+      .replace(/\./g, '\\.')
+      .replace(/\^/g, '\\^')
+      .replace(/\$/, '\\$')
+      .replace(/\|/g, '\\|')
+    
+    const regex = new RegExp(escapedAnchor, 'gi')
+    const highlightClass = ann.who === 'user' ? 'hl-user' : 'hl-ai'
+    
+    result = result.replace(regex, (match) => {
+      return `<mark class="hl ${highlightClass}">${match}</mark>`
+    })
+  }
+  
+  return result
+}
+
 function parseChapters(content) {
-  const chapters = []
   const lines = content.split('\n')
   let currentChapter = { title: '前言', content: '', startIndex: 0 }
+  const chapters = []
   
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
-    const match = line.match(CHAPTER_REGEX)
-    if (match && i > 0) {
-      chapters.push(currentChapter)
-      currentChapter = { title: match[1], content: '', startIndex: i }
+    
+    let matched = false
+    for (const pattern of CHAPTER_PATTERNS) {
+      const match = line.match(pattern)
+      if (match && i > 0 && line.trim().length < 50) {
+        chapters.push(currentChapter)
+        currentChapter = { 
+          title: match[1].trim(), 
+          content: '', 
+          startIndex: i 
+        }
+        matched = true
+        break
+      }
     }
-    currentChapter.content += line + '\n'
+    
+    if (!matched) {
+      currentChapter.content += line + '\n'
+    }
   }
   chapters.push(currentChapter)
-  return chapters.filter(c => c.content.trim())
+  
+  const filtered = chapters.filter(c => c.content.trim())
+  
+  if (filtered.length === 1 && filtered[0].content.length > 5000) {
+    const chunkSize = 3000
+    const chunks = []
+    let text = filtered[0].content
+    let chunkIndex = 1
+    
+    while (text.length > 0) {
+      chunks.push({
+        title: `第 ${chunkIndex} 章`,
+        content: text.slice(0, chunkSize),
+        startIndex: 0
+      })
+      text = text.slice(chunkSize)
+      chunkIndex++
+    }
+    return chunks
+  }
+  
+  return filtered
 }
 
 function getPageText(chapters, currentPage, pageSize) {
@@ -85,6 +168,21 @@ const FloatingReadingPanel = ({ onClose }) => {
   const [parsing, setParsing] = useState(false)
   const [statusMessage, setStatusMessage] = useState('')
   const [showFileSelector, setShowFileSelector] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
+  const [fontSize, setFontSize] = useState(() => {
+    const saved = localStorage.getItem('reading-font-size')
+    return saved ? parseInt(saved, 10) : 16
+  })
+  const [lineHeight, setLineHeight] = useState(() => {
+    const saved = localStorage.getItem('reading-line-height')
+    return saved ? parseFloat(saved) : 1.9
+  })
+  const [annotations, setAnnotations] = useState([])
+  const [selectionText, setSelectionText] = useState('')
+  const [showAnnotationToolbar, setShowAnnotationToolbar] = useState(false)
+  const [toolbarPosition, setToolbarPosition] = useState({ x: 0, y: 0 })
+  const [annotationInput, setAnnotationInput] = useState('')
+  const [isFullscreen, setIsFullscreen] = useState(false)
 
   const panelRef = useRef(null)
   const dragOffset = useRef({ x: 0, y: 0 })
@@ -114,6 +212,93 @@ const FloatingReadingPanel = ({ onClose }) => {
       localStorage.setItem('reading-progress', JSON.stringify({ currentPage }))
     }
   }, [chapters, currentPage])
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--reading-font-size', `${fontSize}px`)
+    localStorage.setItem('reading-font-size', fontSize.toString())
+  }, [fontSize])
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--reading-line-height', lineHeight)
+    localStorage.setItem('reading-line-height', lineHeight.toString())
+  }, [lineHeight])
+
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      const selection = window.getSelection()
+      const text = selection?.toString()?.trim()
+      
+      if (text && text.length > 2 && content) {
+        const range = selection.getRangeAt(0)
+        const rect = range.getBoundingClientRect()
+        
+        setSelectionText(text)
+        setToolbarPosition({
+          x: rect.left + rect.width / 2 - 100,
+          y: rect.bottom + 8
+        })
+        setShowAnnotationToolbar(true)
+      } else {
+        setShowAnnotationToolbar(false)
+      }
+    }
+
+    document.addEventListener('selectionchange', handleSelectionChange)
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange)
+    }
+  }, [content])
+
+  const handleCreateAnnotation = () => {
+    if (!selectionText) return
+    
+    const newAnnotation = {
+      id: Date.now(),
+      anchor: selectionText,
+      note: annotationInput,
+      who: 'user',
+      ts: new Date().toLocaleString('zh-CN'),
+      replies: []
+    }
+    
+    setAnnotations([...annotations, newAnnotation])
+    setAnnotationInput('')
+    setShowAnnotationToolbar(false)
+    window.getSelection()?.removeAllRanges()
+    
+    setStatusMessage('批注已保存')
+    setTimeout(() => setStatusMessage(''), 2000)
+  }
+
+  const handleHighlight = () => {
+    if (!selectionText) return
+    
+    const newAnnotation = {
+      id: Date.now(),
+      anchor: selectionText,
+      note: '',
+      who: 'user',
+      ts: new Date().toLocaleString('zh-CN'),
+      replies: []
+    }
+    
+    setAnnotations([...annotations, newAnnotation])
+    setShowAnnotationToolbar(false)
+    window.getSelection()?.removeAllRanges()
+    
+    setStatusMessage('划线已保存')
+    setTimeout(() => setStatusMessage(''), 2000)
+  }
+
+  const handleCopy = () => {
+    if (!selectionText) return
+    navigator.clipboard.writeText(selectionText)
+    setShowAnnotationToolbar(false)
+    window.getSelection()?.removeAllRanges()
+    
+    setStatusMessage('已复制')
+    setTimeout(() => setStatusMessage(''), 2000)
+  }
 
   async function handleFileSelect(e) {
     const file = (e.target.files || [])[0]
@@ -330,10 +515,10 @@ const FloatingReadingPanel = ({ onClose }) => {
   return createPortal(
     <div
       ref={panelRef}
-      className="floating-reading-panel"
+      className={`floating-reading-panel ${isFullscreen ? 'fullscreen' : ''}`}
       style={{
-        left: position.x,
-        top: position.y,
+        left: !isFullscreen ? position.x : undefined,
+        top: !isFullscreen ? position.y : undefined,
       }}
       onMouseDown={handleMouseDown}
       onTouchStart={handleTouchStart}
@@ -345,19 +530,42 @@ const FloatingReadingPanel = ({ onClose }) => {
           position: fixed !important;
           width: 320px;
           max-width: 90vw;
-          background: rgba(255, 255, 255, 0.95);
+          background: var(--background-card);
           border-radius: 16px;
-          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+          box-shadow: var(--shadow-medium);
           z-index: 99999;
           overflow: hidden;
           backdrop-filter: blur(10px);
-          border: 1px solid rgba(255, 255, 255, 0.5);
+          border: 1px solid var(--border-color);
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Serif SC', serif;
           max-height: 550px;
           display: flex;
           flex-direction: column;
           touch-action: none;
           -webkit-tap-highlight-color: transparent;
+        }
+
+        .floating-reading-panel.fullscreen {
+          width: 100vw !important;
+          max-width: 100vw !important;
+          height: 100vh !important;
+          max-height: 100vh !important;
+          left: 0 !important;
+          top: 0 !important;
+          right: 0 !important;
+          bottom: 0 !important;
+          border-radius: 0 !important;
+          border: none !important;
+          box-shadow: none !important;
+          z-index: 999999 !important;
+        }
+
+        .floating-reading-panel.fullscreen .drag-handle {
+          cursor: default;
+        }
+
+        .floating-reading-panel.fullscreen .content-text {
+          max-height: calc(100vh - 320px) !important;
         }
 
         @media (max-width: 480px) {
@@ -373,11 +581,15 @@ const FloatingReadingPanel = ({ onClose }) => {
             transform: none !important;
             border-radius: 20px 20px 0 0;
           }
+
+          .floating-reading-panel.fullscreen .content-text {
+            max-height: calc(100vh - 300px) !important;
+          }
         }
 
         .drag-handle {
           padding: 16px 20px;
-          background: linear-gradient(135deg, #7C3AED 0%, #5B21B6 100%);
+          background: linear-gradient(135deg, var(--primary-warm-gray-blue) 0%, var(--primary-warm-gray-blue-dark) 100%);
           color: white;
           cursor: grab;
           display: flex;
@@ -397,6 +609,72 @@ const FloatingReadingPanel = ({ onClose }) => {
           margin: 0;
           font-size: 16px;
           font-weight: 600;
+        }
+
+        .fullscreen-btn {
+          width: 44px;
+          height: 44px;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.2);
+          border: none;
+          color: white;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 18px;
+        }
+
+        .fullscreen-btn:hover {
+          background: rgba(255, 255, 255, 0.3);
+        }
+
+        .fullscreen-btn:active {
+          background: rgba(255, 255, 255, 0.4);
+        }
+
+        .settings-btn {
+          width: 44px;
+          height: 44px;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.2);
+          border: none;
+          color: white;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 18px;
+        }
+
+        .settings-btn:hover {
+          background: rgba(255, 255, 255, 0.3);
+        }
+
+        .settings-btn:active {
+          background: rgba(255, 255, 255, 0.4);
+        }
+
+        .theme-toggle-btn {
+          width: 44px;
+          height: 44px;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.2);
+          border: none;
+          color: white;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 18px;
+        }
+
+        .theme-toggle-btn:hover {
+          background: rgba(255, 255, 255, 0.3);
+        }
+
+        .theme-toggle-btn:active {
+          background: rgba(255, 255, 255, 0.4);
         }
 
         .close-btn {
@@ -441,7 +719,7 @@ const FloatingReadingPanel = ({ onClose }) => {
 
         .select-file-btn {
           padding: 16px 32px;
-          background: linear-gradient(135deg, #7C3AED 0%, #5B21B6 100%);
+          background: linear-gradient(135deg, var(--primary-warm-gray-blue) 0%, var(--primary-warm-gray-blue-dark) 100%);
           color: white;
           border: none;
           border-radius: 32px;
@@ -457,7 +735,7 @@ const FloatingReadingPanel = ({ onClose }) => {
 
         .select-file-btn:hover {
           transform: translateY(-1px);
-          box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3);
+          box-shadow: 0 4px 12px rgba(122, 138, 153, 0.3);
         }
 
         .select-file-btn:active {
@@ -469,7 +747,7 @@ const FloatingReadingPanel = ({ onClose }) => {
           align-items: center;
           justify-content: space-between;
           padding: 12px 14px;
-          background: #f8f8f8;
+          background: var(--background-soft);
           border-radius: 12px;
           margin-bottom: 16px;
           font-size: 14px;
@@ -480,11 +758,11 @@ const FloatingReadingPanel = ({ onClose }) => {
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
-          color: #444;
+          color: var(--text-primary);
         }
 
         .file-size {
-          color: #999;
+          color: var(--text-muted);
           margin-left: 12px;
         }
 
@@ -495,17 +773,18 @@ const FloatingReadingPanel = ({ onClose }) => {
         .chapter-selector select {
           width: 100%;
           padding: 14px 16px;
-          border: 1px solid #ddd;
+          border: 1px solid var(--border-color);
           border-radius: 12px;
           font-size: 15px;
-          background: white;
+          background: var(--background-soft);
+          color: var(--text-primary);
           cursor: pointer;
           min-height: 52px;
           box-sizing: border-box;
         }
 
         .chapter-selector select:active {
-          background: #f5f5f5;
+          background: rgba(255, 255, 255, 0.06);
         }
 
         .progress-bar {
@@ -516,37 +795,68 @@ const FloatingReadingPanel = ({ onClose }) => {
           display: flex;
           justify-content: space-between;
           font-size: 13px;
-          color: #666;
+          color: var(--text-secondary);
           margin-bottom: 6px;
         }
 
         .progress-bar-track {
           height: 6px;
-          background: #ddd;
+          background: var(--border-color);
           border-radius: 3px;
           overflow: hidden;
         }
 
         .progress-bar-fill {
           height: 100%;
-          background: linear-gradient(90deg, #7C3AED 0%, #5B21B6 100%);
+          background: linear-gradient(90deg, var(--primary-warm-gray-blue) 0%, var(--primary-warm-gray-blue-dark) 100%);
           border-radius: 3px;
           transition: width 0.3s;
         }
 
         .content-text {
-          font-size: 16px;
-          line-height: 1.9;
-          color: #333;
+          font-size: var(--reading-font-size, 16px);
+          line-height: var(--reading-line-height, 1.9);
+          color: var(--text-primary);
           white-space: pre-wrap;
           word-break: break-all;
           max-height: 220px;
           overflow-y: auto;
           padding: 16px;
-          background: #fafafa;
+          background: var(--background-soft);
           border-radius: 12px;
           margin-bottom: 16px;
           -webkit-overflow-scrolling: touch;
+          position: relative;
+          cursor: pointer;
+        }
+
+        .content-text::before {
+          content: '←';
+          position: absolute;
+          left: 8px;
+          top: 50%;
+          transform: translateY(-50%);
+          font-size: 20px;
+          color: var(--text-muted);
+          opacity: 0.5;
+          transition: opacity 0.2s;
+        }
+
+        .content-text::after {
+          content: '→';
+          position: absolute;
+          right: 8px;
+          top: 50%;
+          transform: translateY(-50%);
+          font-size: 20px;
+          color: var(--text-muted);
+          opacity: 0.5;
+          transition: opacity 0.2s;
+        }
+
+        .content-text:hover::before,
+        .content-text:hover::after {
+          opacity: 0.8;
         }
 
         @media (max-width: 480px) {
@@ -567,12 +877,12 @@ const FloatingReadingPanel = ({ onClose }) => {
 
         .nav-btn {
           padding: 14px 20px;
-          background: #f0f0f0;
+          background: var(--background-soft);
           border: none;
           border-radius: 12px;
           font-size: 15px;
           cursor: pointer;
-          color: #444;
+          color: var(--text-primary);
           min-height: 52px;
           min-width: 80px;
           display: flex;
@@ -581,11 +891,11 @@ const FloatingReadingPanel = ({ onClose }) => {
         }
 
         .nav-btn:hover:not(:disabled) {
-          background: #e0e0e0;
+          background: rgba(255, 255, 255, 0.06);
         }
 
         .nav-btn:active:not(:disabled) {
-          background: #d0d0d0;
+          background: rgba(255, 255, 255, 0.1);
         }
 
         .nav-btn:disabled {
@@ -595,14 +905,14 @@ const FloatingReadingPanel = ({ onClose }) => {
 
         .page-info {
           font-size: 14px;
-          color: #666;
+          color: var(--text-secondary);
           text-align: center;
         }
 
         .companion-btn {
           width: 100%;
           padding: 16px;
-          background: linear-gradient(135deg, #F472B6 0%, #DB2777 100%);
+          background: linear-gradient(135deg, var(--primary-warm-gray-green) 0%, var(--primary-warm-gray-green-dark) 100%);
           color: white;
           border: none;
           border-radius: 12px;
@@ -618,7 +928,7 @@ const FloatingReadingPanel = ({ onClose }) => {
 
         .companion-btn:hover:not(:disabled) {
           transform: translateY(-1px);
-          box-shadow: 0 4px 12px rgba(244, 114, 182, 0.3);
+          box-shadow: 0 4px 12px rgba(122, 139, 125, 0.3);
         }
 
         .companion-btn:active:not(:disabled) {
@@ -628,8 +938,8 @@ const FloatingReadingPanel = ({ onClose }) => {
         .save-note-btn {
           width: 100%;
           padding: 14px;
-          background: #f0f0f0;
-          color: #444;
+          background: var(--background-soft);
+          color: var(--text-primary);
           border: none;
           border-radius: 12px;
           font-size: 15px;
@@ -642,11 +952,11 @@ const FloatingReadingPanel = ({ onClose }) => {
         }
 
         .save-note-btn:hover {
-          background: #e0e0e0;
+          background: rgba(255, 255, 255, 0.06);
         }
 
         .save-note-btn:active {
-          background: #d0d0d0;
+          background: rgba(255, 255, 255, 0.1);
         }
 
         .chat-section {
@@ -656,16 +966,18 @@ const FloatingReadingPanel = ({ onClose }) => {
         .chat-section-title {
           font-size: 15px;
           font-weight: 600;
-          color: #333;
+          color: var(--text-primary);
           margin-bottom: 12px;
         }
 
         .chat-input {
           width: 100%;
           padding: 14px 16px;
-          border: 1px solid #ddd;
+          border: 1px solid var(--border-color);
           border-radius: 12px;
           font-size: 15px;
+          color: var(--text-primary);
+          background: var(--background-soft);
           box-sizing: border-box;
           margin-bottom: 12px;
           resize: none;
@@ -673,13 +985,13 @@ const FloatingReadingPanel = ({ onClose }) => {
         }
 
         .chat-input:active {
-          border-color: #7C3AED;
+          border-color: var(--primary-warm-gray-blue);
         }
 
         .chat-btn {
           width: 100%;
           padding: 14px;
-          background: linear-gradient(135deg, #7C3AED 0%, #5B21B6 100%);
+          background: linear-gradient(135deg, var(--primary-warm-gray-blue) 0%, var(--primary-warm-gray-blue-dark) 100%);
           color: white;
           border: none;
           border-radius: 12px;
@@ -706,21 +1018,21 @@ const FloatingReadingPanel = ({ onClose }) => {
 
         .ai-reply {
           padding: 14px;
-          background: rgba(124, 58, 237, 0.08);
+          background: rgba(122, 138, 153, 0.12);
           border-radius: 12px;
           font-size: 15px;
           line-height: 1.7;
-          color: #444;
+          color: var(--text-primary);
           margin-top: 12px;
         }
 
         .ai-reply strong {
-          color: #7C3AED;
+          color: var(--primary-warm-gray-blue);
         }
 
         .status-message {
           font-size: 13px;
-          color: #7C3AED;
+          color: var(--primary-warm-gray-blue);
           text-align: center;
           margin-bottom: 16px;
         }
@@ -728,7 +1040,7 @@ const FloatingReadingPanel = ({ onClose }) => {
         .parsing-indicator {
           text-align: center;
           padding: 30px;
-          color: #666;
+          color: var(--text-secondary);
         }
 
         .typing-indicator {
@@ -740,7 +1052,7 @@ const FloatingReadingPanel = ({ onClose }) => {
         .typing-dot {
           width: 8px;
           height: 8px;
-          background: #7C3AED;
+          background: var(--primary-warm-gray-blue);
           border-radius: 50%;
           margin: 0 4px;
           animation: typing 1.4s infinite ease-in-out both;
@@ -752,6 +1064,200 @@ const FloatingReadingPanel = ({ onClose }) => {
         @keyframes typing {
           0%, 80%, 100% { transform: scale(0); }
           40% { transform: scale(1); }
+        }
+
+        .settings-panel {
+          padding: 16px;
+          background: var(--background-soft);
+          border-radius: 12px;
+          margin-bottom: 16px;
+        }
+
+        .settings-title {
+          font-size: 15px;
+          font-weight: 600;
+          color: var(--text-primary);
+          margin-bottom: 16px;
+        }
+
+        .setting-item {
+          margin-bottom: 16px;
+        }
+
+        .setting-item:last-child {
+          margin-bottom: 0;
+        }
+
+        .setting-label {
+          font-size: 14px;
+          color: var(--text-secondary);
+          margin-bottom: 8px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+
+        .setting-value {
+          font-size: 14px;
+          color: var(--text-muted);
+        }
+
+        .setting-slider {
+          width: 100%;
+          height: 6px;
+          border-radius: 3px;
+          background: var(--border-color);
+          appearance: none;
+          cursor: pointer;
+        }
+
+        .setting-slider::-webkit-slider-thumb {
+          appearance: none;
+          width: 18px;
+          height: 18px;
+          border-radius: 50%;
+          background: var(--primary-warm-gray-blue);
+          cursor: pointer;
+          border: 2px solid white;
+          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .setting-slider::-moz-range-thumb {
+          width: 18px;
+          height: 18px;
+          border-radius: 50%;
+          background: var(--primary-warm-gray-blue);
+          cursor: pointer;
+          border: 2px solid white;
+          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .annotation-toolbar {
+          position: fixed;
+          left: 50%;
+          bottom: 20px;
+          transform: translateX(-50%);
+          display: flex;
+          gap: 8px;
+          background: var(--background-card);
+          border: 1px solid var(--border-color);
+          border-radius: 12px;
+          padding: 8px;
+          box-shadow: var(--shadow-medium);
+          z-index: 100000;
+          animation: slideUp 0.2s ease-out;
+        }
+
+        @keyframes slideUp {
+          from {
+            opacity: 0;
+            transform: translateX(-50%) translateY(10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+          }
+        }
+
+        .annotation-btn {
+          padding: 10px 16px;
+          background: var(--background-soft);
+          border: none;
+          border-radius: 8px;
+          font-size: 14px;
+          color: var(--text-primary);
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          min-width: 80px;
+        }
+
+        .annotation-btn:hover {
+          background: rgba(255, 255, 255, 0.06);
+        }
+
+        .annotation-btn:active {
+          background: rgba(255, 255, 255, 0.1);
+        }
+
+        .annotation-input {
+          width: 200px;
+          padding: 10px 12px;
+          border: 1px solid var(--border-color);
+          border-radius: 8px;
+          font-size: 14px;
+          color: var(--text-primary);
+          background: var(--background-soft);
+        }
+
+        .annotation-input:focus {
+          outline: none;
+          border-color: var(--primary-warm-gray-blue);
+        }
+
+        .annotation-bubble {
+          padding: 12px;
+          border-radius: 8px;
+          font-size: 14px;
+          line-height: 1.6;
+          margin-bottom: 8px;
+        }
+
+        .annotation-bubble.user {
+          background: rgba(122, 139, 125, 0.12);
+          border-left: 3px solid var(--primary-warm-gray-green);
+          color: var(--text-primary);
+        }
+
+        .annotation-bubble.ai {
+          background: rgba(122, 138, 153, 0.12);
+          border-left: 3px solid var(--primary-warm-gray-blue);
+          color: var(--text-primary);
+        }
+
+        .annotation-list {
+          margin-top: 16px;
+          padding-top: 16px;
+          border-top: 1px solid var(--border-color);
+        }
+
+        .annotation-item {
+          margin-bottom: 12px;
+        }
+
+        .annotation-anchor {
+          font-size: 13px;
+          color: var(--text-muted);
+          margin-bottom: 4px;
+          font-style: italic;
+        }
+
+        mark.hl {
+          border-radius: 2px;
+          padding: 1px 0;
+          cursor: pointer;
+          transition: background 0.15s ease;
+        }
+
+        mark.hl-user {
+          background: rgba(122, 139, 125, 0.15);
+        }
+
+        mark.hl-user:hover {
+          background: rgba(122, 139, 125, 0.25);
+        }
+
+        mark.hl-ai {
+          background: rgba(122, 138, 153, 0.15);
+        }
+
+        mark.hl-ai:hover {
+          background: rgba(122, 138, 153, 0.25);
+        }
+
+        mark.hl-both {
+          background: linear-gradient(180deg, rgba(122,139,125,0.15) 50%, rgba(122,138,153,0.15) 50%);
         }
 
         @media (max-width: 480px) {
@@ -848,8 +1354,63 @@ const FloatingReadingPanel = ({ onClose }) => {
 
       <div className="drag-handle">
         <h3>📖 阅读陪伴</h3>
-        <button className="close-btn" onClick={onClose}>×</button>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button 
+            className="fullscreen-btn"
+            onClick={() => setIsFullscreen(!isFullscreen)}
+            title={isFullscreen ? '退出全屏' : '全屏阅读'}
+          >
+            {isFullscreen ? '⛶' : '⛶'}
+          </button>
+          <button 
+            className="settings-btn"
+            onClick={() => setShowSettings(!showSettings)}
+            title="阅读设置"
+          >
+            ⚙️
+          </button>
+          <button 
+            className="theme-toggle-btn"
+            onClick={() => {
+              const currentTheme = document.documentElement.getAttribute('data-theme')
+              const newTheme = currentTheme === 'night' ? 'light' : 'night'
+              document.documentElement.setAttribute('data-theme', newTheme)
+              localStorage.setItem('x_theme', newTheme)
+            }}
+            title="切换主题"
+          >
+            {document.documentElement.getAttribute('data-theme') === 'night' ? '☀️' : '🌙'}
+          </button>
+          <button className="close-btn" onClick={onClose}>×</button>
+        </div>
       </div>
+
+      {showAnnotationToolbar && (
+        <div className="annotation-toolbar">
+          <button className="annotation-btn" onClick={handleHighlight}>
+            ✏️ 划线
+          </button>
+          <input 
+            className="annotation-input"
+            type="text"
+            placeholder="添加批注..."
+            value={annotationInput}
+            onChange={(e) => setAnnotationInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                handleCreateAnnotation()
+              }
+            }}
+            autoFocus
+          />
+          <button className="annotation-btn" onClick={handleCreateAnnotation}>
+            💬 批注
+          </button>
+          <button className="annotation-btn" onClick={handleCopy}>
+            📋 复制
+          </button>
+        </div>
+      )}
 
       <div className="panel-content">
         {parsing && (
@@ -886,6 +1447,41 @@ const FloatingReadingPanel = ({ onClose }) => {
 
         {content && (
           <>
+            {showSettings && (
+              <div className="settings-panel">
+                <div className="settings-title">阅读设置</div>
+                <div className="setting-item">
+                  <div className="setting-label">
+                    <span>字体大小</span>
+                    <span className="setting-value">{fontSize}px</span>
+                  </div>
+                  <input 
+                    type="range" 
+                    className="setting-slider" 
+                    min="14" 
+                    max="28" 
+                    value={fontSize}
+                    onChange={(e) => setFontSize(parseInt(e.target.value, 10))}
+                  />
+                </div>
+                <div className="setting-item">
+                  <div className="setting-label">
+                    <span>行高</span>
+                    <span className="setting-value">{lineHeight.toFixed(1)}</span>
+                  </div>
+                  <input 
+                    type="range" 
+                    className="setting-slider" 
+                    min="1.5" 
+                    max="2.2" 
+                    step="0.1"
+                    value={lineHeight}
+                    onChange={(e) => setLineHeight(parseFloat(e.target.value))}
+                  />
+                </div>
+              </div>
+            )}
+
             <div className="file-info">
               <span className="file-name">{currentFile?.name}</span>
               <span className="file-size">{currentFile?.size?.toLocaleString()} 字节</span>
@@ -917,7 +1513,21 @@ const FloatingReadingPanel = ({ onClose }) => {
               </div>
             </div>
 
-            <div className="content-text">{currentPageText}</div>
+            <div 
+              className="content-text"
+              onClick={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect()
+                const clickX = e.clientX - rect.left
+                const panelWidth = rect.width
+                
+                if (clickX < panelWidth * 0.35) {
+                  goToPrevPage()
+                } else if (clickX > panelWidth * 0.65) {
+                  goToNextPage()
+                }
+              }}
+              dangerouslySetInnerHTML={{ __html: highlightText(currentPageText, annotations) }}
+            />
 
             <div className="page-nav">
               <button className="nav-btn" onClick={goToPrevPage} disabled={currentPage === 0}>
@@ -936,6 +1546,23 @@ const FloatingReadingPanel = ({ onClose }) => {
             <button className="save-note-btn" onClick={handleSaveNote}>
               📝 保存到读书笔记
             </button>
+
+            {annotations.length > 0 && (
+              <div className="annotation-list">
+                <div className="chat-section-title">📌 我的批注</div>
+                {annotations.map(ann => (
+                  <div key={ann.id} className="annotation-item">
+                    <div className="annotation-anchor">"{ann.anchor.length > 50 ? ann.anchor.slice(0, 50) + '...' : ann.anchor}"</div>
+                    {ann.note && (
+                      <div className="annotation-bubble user">{ann.note}</div>
+                    )}
+                    {ann.replies.map((reply, idx) => (
+                      <div key={idx} className="annotation-bubble ai">{reply.text}</div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="chat-section">
               <div className="chat-section-title">和她讨论这段内容</div>

@@ -2,11 +2,34 @@
 // 供「阅读搭子」和「聊天输入框附件」共用（浏览器端，按需动态加载解析库）。
 
 // 单个文档提取文字的字符上限，防止超长文本撑爆 prompt。
-export const MAX_DOC_CHARS = 20000
+export const MAX_DOC_CHARS = Infinity
 
-// 解析 txt：浏览器原生读取
 async function parseTxt(file) {
-  return await file.text()
+  const buffer = await file.arrayBuffer()
+  
+  const encodings = ['GBK', 'GB2312', 'GB18030', 'UTF-8']
+  
+  for (const encoding of encodings) {
+    try {
+      const decoder = new TextDecoder(encoding)
+      const text = decoder.decode(buffer)
+      
+      if (encoding === 'UTF-8') {
+        return text
+      }
+      
+      const hasValidChinese = /[\u4e00-\u9fa5]/.test(text)
+      const hasInvalidChars = /\uFFFD/.test(text)
+      
+      if (hasValidChinese && !hasInvalidChars) {
+        return text
+      }
+    } catch (e) {
+      continue
+    }
+  }
+  
+  return new TextDecoder('UTF-8').decode(buffer)
 }
 
 // 解析 pdf：动态加载 pdfjs 提取每页文字（仅文字版 PDF 有效，扫描图片版提不出）

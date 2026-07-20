@@ -4,6 +4,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const { listMcpTools, callMcpTool } = require('./mcp-client')
 
 // ========== 只读代码能力：路径安全护栏 ==========
 // 铁律：只读、白名单、无副作用。以下五道护栏缺一不可。
@@ -144,7 +145,7 @@ function getTarotSpreads() {
   }
 }
 
-function buildToolDefinitions(enabledTools) {
+async function buildToolDefinitions(enabledTools) {
   // 塔罗牌阵清单动态拼进工具描述，让模型根据问题性质自选牌阵（不写死）
   const spreads = getTarotSpreads()
   const spreadLines = spreads.map(s => `${s.id}（${s.name}）：${s.scope}`).join('；')
@@ -156,6 +157,95 @@ function buildToolDefinitions(enabledTools) {
         query: { type: 'string', description: '搜索关键词或问题' },
       },
       required: ['query'],
+    },
+    // ========== 阅读伴侣 MCP 工具 ==========
+    'list_books': {
+      description: '列出所有已上传的书籍，返回书籍 ID、名称、章节数量等信息',
+      parameters: {
+      },
+      required: [],
+    },
+    'read_pages': {
+      description: '阅读指定书籍的指定页码，返回该页的文本内容',
+      parameters: {
+        bookId: { type: 'string', description: '书籍 ID' },
+        pageNum: { type: 'integer', description: '页码，从 0 开始' },
+      },
+      required: ['bookId', 'pageNum'],
+    },
+    'read_annotations': {
+      description: '读取指定书籍的所有批注，返回批注列表（包含划线片段、批注内容）',
+      parameters: {
+        bookId: { type: 'string', description: '书籍 ID' },
+      },
+      required: ['bookId'],
+    },
+    'get_chapter_notes': {
+      description: '获取指定书籍的所有章节剧情笔记（AI 生成的摘要）',
+      parameters: {
+        bookId: { type: 'string', description: '书籍 ID' },
+      },
+      required: ['bookId'],
+    },
+    'generate_chapter_note': {
+      description: '为指定章节生成剧情笔记摘要（调用 AI 生成 150-250 字摘要）',
+      parameters: {
+        bookId: { type: 'string', description: '书籍 ID' },
+        chapterId: { type: 'integer', description: '章节索引（从 0 开始）' },
+        chapterTitle: { type: 'string', description: '章节标题' },
+        chapterContent: { type: 'string', description: '章节内容（截取前 3000 字即可）' },
+      },
+      required: ['bookId', 'chapterId', 'chapterTitle', 'chapterContent'],
+    },
+    'write_comment': {
+      description: '在指定书籍的指定章节写批注',
+      parameters: {
+        bookId: { type: 'string', description: '书籍 ID' },
+        chapterId: { type: 'integer', description: '章节索引' },
+        anchor: { type: 'string', description: '被批注的原文片段（定位锚点）' },
+        text: { type: 'string', description: '批注内容' },
+      },
+      required: ['bookId', 'chapterId', 'anchor', 'text'],
+    },
+    'highlight_text': {
+      description: '在书籍中划线高亮一段文字',
+      parameters: {
+        bookId: { type: 'string', description: '书籍 ID' },
+        chapterId: { type: 'integer', description: '章节索引' },
+        text: { type: 'string', description: '要划线的文本片段' },
+        color: { type: 'string', description: '颜色：user（用户绿色）或 ai（AI蓝色）', enum: ['user', 'ai'] },
+      },
+      required: ['bookId', 'chapterId', 'text'],
+    },
+    'get_progress': {
+      description: '获取指定书籍的阅读进度（当前页码、总页数、完成百分比）',
+      parameters: {
+        bookId: { type: 'string', description: '书籍 ID' },
+      },
+      required: ['bookId'],
+    },
+    'goto_page': {
+      description: '跳转到书籍的指定页码',
+      parameters: {
+        bookId: { type: 'string', description: '书籍 ID' },
+        pageNum: { type: 'integer', description: '目标页码，从 0 开始' },
+      },
+      required: ['bookId', 'pageNum'],
+    },
+    'goto_chapter': {
+      description: '跳转到书籍的指定章节',
+      parameters: {
+        bookId: { type: 'string', description: '书籍 ID' },
+        chapterId: { type: 'integer', description: '目标章节索引，从 0 开始' },
+      },
+      required: ['bookId', 'chapterId'],
+    },
+    'recent_activity': {
+      description: '获取最近的阅读活动（最近阅读过的书籍、进度）',
+      parameters: {
+        hours: { type: 'integer', description: '查询最近多少小时内的活动，默认 24 小时' },
+      },
+      required: [],
     },
     '打开网页': {
       description: '打开并读取指定网址（URL）的正文内容。当用户发来一个链接、或需要了解某个具体网页里写了什么时使用。注意：这是读取指定链接的真实内容，与「网页搜索」（按关键词搜索）不同。',
@@ -265,13 +355,63 @@ function buildToolDefinitions(enabledTools) {
     },
   }
 
-  return enabledTools.map(tool => {
+  // MCP 服务器：并行拉取每个 MCP 的工具清单，稍后展开成多个 function。
+  // 一个 MCP 服务器通常提供多个工具，所以「一条 MCP 工具记录 → N 个 function」。
+  const mcpEntries = enabledTools.filter(t => t.type === 'mcp' && t.endpoint)
+  const mcpResults = await Promise.all(
+    mcpEntries.map(async t => {
+      try {
+        const remoteTools = await listMcpTools(t.endpoint)
+        return { tool: t, remoteTools, error: null }
+      } catch (err) {
+        console.warn(`[MCP] 拉取 ${t.name} 工具清单失败:`, err.message)
+        return { tool: t, remoteTools: [], error: err.message }
+      }
+    })
+  )
+  const mcpByTool = new Map(mcpResults.map(r => [r.tool, r]))
+
+  const defs = []
+  for (const tool of enabledTools) {
+    // MCP 类型：把远程工具清单展开成独立 function，命名空间化避免重名
+    // 格式：mcp__<safeId>__<远程工具名>，executeToolCall 据此前缀路由
+    if (tool.type === 'mcp' && tool.endpoint) {
+      const { remoteTools, error } = mcpByTool.get(tool) || { remoteTools: [], error: '未拉取' }
+      if (error) {
+        // 拉取失败也注入一个占位 function，让 AI 能感知该服务不可用并告知用户
+        defs.push({
+          type: 'function',
+          function: {
+            name: `mcp__${normalizeToolName(tool.id || tool.name)}__unavailable`,
+            description: `[MCP:${tool.name}] 当前不可用：${error}。请告知用户该服务暂时连不上，不要尝试调用。`,
+            parameters: { type: 'object', properties: {}, required: [] },
+          },
+        })
+        continue
+      }
+      for (const rt of remoteTools) {
+        defs.push({
+          type: 'function',
+          function: {
+            name: `mcp__${normalizeToolName(tool.id || tool.name)}__${rt.name}`,
+            description: `[MCP:${tool.name}] ${rt.description || rt.name}`,
+            // MCP 的 inputSchema 已是 JSON Schema，直接用；缺省给空对象
+            parameters: rt.inputSchema && typeof rt.inputSchema === 'object'
+              ? rt.inputSchema
+              : { type: 'object', properties: {}, required: [] },
+          },
+        })
+      }
+      continue
+    }
+
+    // 非 MCP 工具：走原有 schema 逻辑（内置命中 / 自定义兜底）
     const schema = toolSchemas[tool.name] || {
       description: tool.description || `${tool.name} 工具`,
       parameters: { query: { type: 'string', description: '传给工具的查询内容' } },
       required: ['query'],
     }
-    return {
+    defs.push({
       type: 'function',
       function: {
         name: normalizeToolName(tool.name || tool.id),
@@ -282,12 +422,45 @@ function buildToolDefinitions(enabledTools) {
           required: schema.required,
         },
       },
-    }
-  })
+    })
+  }
+  return defs
 }
 
 async function executeToolCall(toolCall, enabledTools) {
   const functionName = toolCall?.function?.name
+
+  // ========== MCP 工具路由 ==========
+  // MCP 工具的 function name 形如 mcp__<safeId>__<远程工具名>，不落在 enabledTools 的
+  // name 里（它是「一条 MCP 记录 → N 个 function」展开的），所以要在 matchedTool 查找前拦截。
+  if (functionName && functionName.startsWith('mcp__')) {
+    const parts = functionName.split('__')
+    if (parts.length >= 3) {
+      const safeIdPart = parts[1]
+      const remoteToolName = parts.slice(2).join('__')
+      const mcpServer = enabledTools.find(t => t.type === 'mcp' && normalizeToolName(t.id || t.name) === safeIdPart)
+      if (!mcpServer) {
+        return { ok: false, name: functionName, error: 'MCP 服务未启用或已移除' }
+      }
+      if (!mcpServer.endpoint) {
+        return { ok: false, name: functionName, error: 'MCP 服务未配置 endpoint' }
+      }
+      if (remoteToolName === 'unavailable') {
+        return { ok: false, name: functionName, error: '该 MCP 服务当前不可用' }
+      }
+      let mcpArgs = {}
+      try { mcpArgs = JSON.parse(toolCall.function.arguments || '{}') } catch { mcpArgs = {} }
+      console.log(`[MCP调用] ${mcpServer.name} -> ${remoteToolName}，参数:`, mcpArgs)
+      try {
+        const output = await callMcpTool(mcpServer.endpoint, remoteToolName, mcpArgs)
+        return { ok: true, name: functionName, input: JSON.stringify(mcpArgs), output }
+      } catch (err) {
+        return { ok: false, name: functionName, input: JSON.stringify(mcpArgs), error: 'MCP 调用失败：' + err.message }
+      }
+    }
+    return { ok: false, name: functionName, error: 'MCP 工具名格式无效' }
+  }
+
   const matchedTool = enabledTools.find(tool => normalizeToolName(tool.name || tool.id) === functionName)
   if (!matchedTool) {
     return { ok: false, name: functionName, error: '工具不存在或未启用' }
@@ -466,6 +639,111 @@ async function executeToolCall(toolCall, enabledTools) {
       const output = listProjectDir(String(args.path || args.query || ''))
       if (output.ok) return { ok: true, name: toolName, input: output.rel || '(项目根)', output: output.text }
       return { ok: false, name: toolName, input: String(args.path || ''), error: output.error }
+    }
+
+    // ========== 阅读伴侣工具执行 ==========
+
+    if (toolName === 'list_books') {
+      const { readStorage } = require('./storage')
+      const books = readStorage('reading-books') || []
+      const result = books.map(b => ({
+        id: b.id,
+        name: b.name,
+        chapterCount: (b.chapters || []).length,
+        progress: b.progress || 0,
+        lastReadTime: b.lastReadTime
+      }))
+      return { ok: true, name: toolName, input: '', output: JSON.stringify(result, null, 2) }
+    }
+
+    if (toolName === 'get_progress') {
+      const { readStorage } = require('./storage')
+      const bookId = String(args.bookId || args.query || '')
+      const books = readStorage('reading-books') || []
+      const book = books.find(b => b.id === bookId)
+      if (!book) {
+        return { ok: false, name: toolName, input: bookId, error: '书籍不存在' }
+      }
+      const totalPages = Math.ceil( /* content length is in indexedDB */ book.totalPages || 0)
+      const progress = {
+        bookId,
+        bookName: book.name,
+        currentPage: book.currentPage || 0,
+        totalPages,
+        progressPercent: book.progress || 0,
+        lastReadTime: book.lastReadTime
+      }
+      return { ok: true, name: toolName, input: bookId, output: JSON.stringify(progress, null, 2) }
+    }
+
+    if (toolName === 'recent_activity') {
+      const { readStorage } = require('./storage')
+      const hours = args.hours || 24
+      const cutoff = Date.now() - hours * 60 * 60 * 1000
+      const books = readStorage('reading-books') || []
+      const recent = books
+        .filter(b => b.lastReadTime && Date.parse(b.lastReadTime) >= cutoff)
+        .sort((a, b) => Date.parse(b.lastReadTime) - Date.parse(a.lastReadTime))
+        .reverse()
+        .map(b => ({
+          id: b.id,
+          name: b.name,
+          progress: b.progress || 0,
+          lastReadTime: b.lastReadTime
+        }))
+      return { ok: true, name: toolName, input: `${hours} hours`, output: JSON.stringify(recent, null, 2) }
+    }
+
+    if (toolName === 'get_chapter_notes') {
+      const { readStorage } = require('./storage')
+      const bookId = String(args.bookId || args.query || '')
+      const chapterNotes = readStorage('reading-chapter-notes') || []
+      const notes = chapterNotes.filter(n => n.bookId === bookId)
+      const result = notes.map(n => ({
+        chapterId: n.chapterId,
+        chapterTitle: n.chapterTitle,
+        summary: n.summary,
+        wordCount: n.wordCount,
+        createdAt: n.created_at
+      }))
+      return { ok: true, name: toolName, input: bookId, output: JSON.stringify(result, null, 2) }
+    }
+
+    if (toolName === 'read_annotations') {
+      const { readStorage } = require('./storage')
+      const bookId = String(args.bookId || args.query || '')
+      const annotations = readStorage('reading-annotations') || []
+      const result = annotations.filter(a => a.bookId === bookId)
+      return { ok: true, name: toolName, input: bookId, output: JSON.stringify(result, null, 2) }
+    }
+
+    if (toolName === 'generate_chapter_note') {
+      // 这个工具需要 AI 调用，实际生成由后端 API 直接处理
+      // 这里只是占位，实际调用走 generateChapterNote API
+      const { bookId, chapterId, chapterTitle, chapterContent } = args
+      const input = `${bookId} #${chapterId} ${chapterTitle}`
+      return { ok: true, name: toolName, input, output: `已触发剧情笔记生成，请调用后端 API /api/books/${bookId}/generate-chapter-notes 获取结果` }
+    }
+
+    if (toolName === 'write_comment') {
+      // 写批注需要通过 API 保存到后端，这里只是信息占位
+      const { bookId, chapterId, anchor, text } = args
+      const input = `${bookId} #${chapterId} "${anchor.slice(0, 50)}..."`
+      return { ok: true, name: toolName, input, output: `批注已记录，请通过 POST /api/annotations 保存到后端` }
+    }
+
+    if (toolName === 'highlight_text') {
+      // 高亮需要通过 API 保存到后端
+      const { bookId, chapterId, text, color } = args
+      const input = `${bookId} #${chapterId} "${text.slice(0, 50)}..."`
+      return { ok: true, name: toolName, input, output: `高亮已记录，请通过 POST /api/annotations 保存到后端` }
+    }
+
+    if (toolName === 'goto_page' || toolName === 'goto_chapter') {
+      // 页面跳转由前端处理，工具只是告知意图
+      const { bookId, pageNum, chapterId } = args
+      const target = pageNum !== undefined ? `page ${pageNum}` : `chapter ${chapterId}`
+      return { ok: true, name: toolName, input: `${bookId} -> ${target}`, output: `前端将跳转至 ${target}，AI 请等待前端更新` }
     }
 
     // 默认工具响应

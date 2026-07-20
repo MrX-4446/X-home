@@ -612,6 +612,43 @@ export async function bulkUploadNotes(notes) {
   }
 }
 
+export async function getAnnotations(bookId) {
+  try {
+    const url = bookId ? `/api/annotations?bookId=${bookId}` : '/api/annotations'
+    const res = await request(url)
+    return res?.data || []
+  } catch (err) {
+    console.error('获取批注失败:', err)
+    return []
+  }
+}
+
+export async function saveAnnotation(annotation) {
+  try {
+    const res = await request('/api/annotations', {
+      method: 'POST',
+      body: JSON.stringify(annotation),
+    })
+    return res?.data || null
+  } catch (err) {
+    console.error('保存批注失败:', err)
+    return null
+  }
+}
+
+export async function deleteAnnotation(annotationId) {
+  try {
+    const res = await request('/api/annotations', {
+      method: 'DELETE',
+      body: JSON.stringify({ id: annotationId }),
+    })
+    return res?.data || []
+  } catch (err) {
+    console.error('删除批注失败:', err)
+    return null
+  }
+}
+
 // ===== 日程 / 日历 API =====
 
 export async function getSchedules(month = null) {
@@ -807,6 +844,44 @@ export async function importData(backup) {
   } catch (err) {
     console.error('导入数据失败:', err)
     throw err
+  }
+}
+
+// ===== 剧情笔记 API（阅读伴侣 - 逐章摘要）=====
+
+// 生成章节剧情笔记（AI 调用）
+export async function generateChapterNote(bookId, chapterId, chapterTitle, chapterContent, providerId = null) {
+  try {
+    const res = await request(`/api/books/${bookId}/generate-chapter-notes`, {
+      method: 'POST',
+      body: JSON.stringify({ chapterId, chapterTitle, chapterContent, providerId }),
+    })
+    return res?.data || null
+  } catch (err) {
+    console.error('生成剧情笔记失败:', err)
+    return null
+  }
+}
+
+// 获取书籍的所有章节笔记
+export async function getChapterNotes(bookId) {
+  try {
+    const res = await request(`/api/books/${bookId}/chapter-notes`)
+    return res?.data || []
+  } catch (err) {
+    console.error('获取章节笔记失败:', err)
+    return []
+  }
+}
+
+// 删除章节笔记
+export async function deleteChapterNote(bookId, chapterId) {
+  try {
+    await request(`/api/books/${bookId}/chapter-notes/${chapterId}`, { method: 'DELETE' })
+    return true
+  } catch (err) {
+    console.error('删除章节笔记失败:', err)
+    return false
   }
 }
 

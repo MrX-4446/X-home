@@ -1,4 +1,4 @@
-function HomePage({ onStartChat, onNewChat, latestChat, onOpenAppSettings, onOpenToolConfig, onOpenMemory, onOpenDiary, onOpenAppCheck, onOpenReading, onOpenCalendar, onOpenDesire, onOpenStats, onOpenFloatingReading }) {
+function HomePage({ onStartChat, onNewChat, latestChat, onOpenAppSettings, onOpenToolConfig, onOpenMemory, onOpenDiary, onOpenAppCheck, onOpenReading, onOpenCalendar, onOpenDesire, onOpenStats }) {
   // 从最近一条聊天中提取展示信息：聊天对象名 + 最后一条消息内容
   const messages = latestChat?.messages || []
   const lastMsg = messages[messages.length - 1]
@@ -70,9 +70,7 @@ function HomePage({ onStartChat, onNewChat, latestChat, onOpenAppSettings, onOpe
             <div className="divider"></div>
             <button className="utility-btn" onClick={onOpenStats}>数据体积</button>
             <div className="divider"></div>
-            <button className="utility-btn" onClick={onOpenReading}>一起读</button>
-            <div className="divider"></div>
-            <button className="utility-btn" onClick={onOpenFloatingReading}>阅读陪伴</button>
+            <button className="utility-btn" onClick={onOpenReading}>阅读</button>
           </div>
         </div>
       </div>

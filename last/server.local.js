@@ -738,7 +738,7 @@ const server = http.createServer(async (req, res) => {
         const { messagesCopy } = await prepareChatMessages(chatId, newMessages)
 
         const enabledTools = mockTools.filter(t => t.enabled)
-        const toolDefinitions = buildToolDefinitions(enabledTools)
+        const toolDefinitions = await buildToolDefinitions(enabledTools)
 
         // 第一次流式调用（带工具）
         const firstResult = await callAIProviderStream(
@@ -959,8 +959,8 @@ ${fullSystemPrompt}
 
           // ========== 工具调用流程 ==========
           const enabledTools = mockTools.filter(t => t.enabled)
-          const toolDefinitions = buildToolDefinitions(enabledTools)
-          
+          const toolDefinitions = await buildToolDefinitions(enabledTools)
+
           // 第一次调用 AI（带工具）
           const firstResult = await callAIProvider(selectedProviderId, messagesCopy, { tools: toolDefinitions, purpose: '主聊天' })
           let finalReply = firstResult.reply
@@ -1314,6 +1314,149 @@ ${fullSystemPrompt}
       })
       writeStorage('reading-notes', notes)
       return sendJson(res, 200, { data: notes, added })
+    }
+
+    if (pathname === '/api/annotations' && req.method === 'GET') {
+      const bookId = req.query.bookId
+      let annotations = readStorage('reading-annotations') || []
+      if (bookId) {
+        annotations = annotations.filter(a => a.bookId === bookId)
+      }
+      return sendJson(res, 200, { data: annotations })
+    }
+
+    if (pathname === '/api/annotations' && req.method === 'POST') {
+      const body = await readBody(req)
+      if (!body || !body.bookId || !body.anchor) {
+        return sendJson(res, 400, { error: '缺少必要参数' })
+      }
+      const annotations = readStorage('reading-annotations') || []
+      const newAnnotation = {
+        ...body,
+        id: body.id || Date.now(),
+        created_at: body.created_at || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+      const existIndex = annotations.findIndex(a => String(a.id) === String(newAnnotation.id))
+      if (existIndex !== -1) {
+        annotations[existIndex] = { ...annotations[existIndex], ...newAnnotation }
+      } else {
+        annotations.push(newAnnotation)
+      }
+      writeStorage('reading-annotations', annotations)
+      return sendJson(res, 200, { data: newAnnotation })
+    }
+
+    if (pathname === '/api/annotations' && req.method === 'DELETE') {
+      const body = await readBody(req)
+      const annotations = readStorage('reading-annotations') || []
+      const filtered = annotations.filter(a => String(a.id) !== String(body.id))
+      writeStorage('reading-annotations', filtered)
+      return sendJson(res, 200, { data: filtered })
+    }
+
+    // ===== 剧情笔记 API（阅读伴侣 - 逐章摘要）=====
+    if (pathname.match(/\/api\/books\/.+\/generate-chapter-notes/) && req.method === 'POST') {
+      const parts = pathname.split('/')
+      const bookId = parts[3]
+      const body = await readBody(req)
+      const { chapterId, chapterTitle, chapterContent, providerId } = body
+
+      if (!bookId || chapterId === undefined || !chapterContent) {
+        return sendJson(res, 400, { error: '缺少必要参数: bookId, chapterId, chapterContent' })
+      }
+
+      try {
+        // 选用配置好的 AI 提供商
+        let selectedProvider = null
+        if (providerId) {
+          selectedProvider = mockAIProviders.find(p => p.id === providerId)
+        } else {
+          selectedProvider = mockAIProviders.find(p => p.enabled)
+        }
+
+        if (!selectedProvider) {
+          return sendJson(res, 400, { error: '没有可用的 AI 提供商' })
+        }
+
+        // 构建 prompt
+        const systemPrompt = `你是一个小说阅读助手，请为以下小说章节生成一份简洁的剧情摘要（150-250字）。
+
+要求：
+1. 概括本章主要发生了什么事件
+2. 提及涉及的关键人物
+3. 保持客观简洁，不要添加个人评论
+4. 控制在 150-250 字之间`
+
+        const userPrompt = `小说章节标题：${chapterTitle || '未命名'}
+
+章节内容：
+${chapterContent.slice(0, 3000)}
+
+请生成摘要：`
+
+        const messages = [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ]
+
+        // 调用 AI 生成摘要
+        const result = await callAIProvider(selectedProvider, messages, { purpose: '剧情笔记生成' })
+        const summary = result.reply || ''
+
+        if (!summary) {
+          return sendJson(res, 500, { error: 'AI 未生成有效摘要' })
+        }
+
+        // 保存到存储
+        const chapterNotes = readStorage('reading-chapter-notes') || []
+        const existingIndex = chapterNotes.findIndex(
+          n => n.bookId === bookId && n.chapterId === chapterId
+        )
+
+        const newNote = {
+          bookId,
+          chapterId,
+          chapterTitle,
+          summary: summary.trim(),
+          wordCount: summary.trim().length,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }
+
+        if (existingIndex !== -1) {
+          chapterNotes[existingIndex] = { ...chapterNotes[existingIndex], ...newNote }
+        } else {
+          chapterNotes.push(newNote)
+        }
+
+        writeStorage('reading-chapter-notes', chapterNotes)
+
+        return sendJson(res, 200, { data: newNote })
+      } catch (error) {
+        console.error('[剧情笔记] 生成失败:', error)
+        return sendJson(res, 500, { error: error.message })
+      }
+    }
+
+    if (pathname.match(/\/api\/books\/.+\/chapter-notes/) && req.method === 'GET') {
+      const parts = pathname.split('/')
+      const bookId = parts[3]
+      const chapterNotes = readStorage('reading-chapter-notes') || []
+      const bookNotes = chapterNotes.filter(n => n.bookId === bookId)
+      return sendJson(res, 200, { data: bookNotes })
+    }
+
+    if (pathname.match(/\/api\/books\/.+\/chapter-notes\/.+/) && req.method === 'DELETE') {
+      const parts = pathname.split('/')
+      const bookId = parts[3]
+      const chapterId = parseInt(parts[5], 10)
+      const chapterNotes = readStorage('reading-chapter-notes') || []
+      const filtered = chapterNotes.filter(
+        n => !(n.bookId === bookId && n.chapterId === chapterId)
+      )
+      writeStorage('reading-chapter-notes', filtered)
+      return sendJson(res, 200, { ok: true })
     }
 
     if (pathname.match(/\/api\/notes\/.+/) && req.method === 'PATCH') {
