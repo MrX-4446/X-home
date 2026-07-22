@@ -8,7 +8,8 @@ import MemoryPanel from './components/MemoryPanel'
 import DiaryPanel from './components/DiaryPanel'
 import AppCheckPanel from './components/AppCheckPanel'
 import CalendarPanel from './components/CalendarPanel'
-import ReadingPage from './components/ReadingPage'
+import ReadingNotesPage from './components/ReadingNotesPage'
+import ReadingHelper from './components/ReadingHelper'
 import DesirePanel from './components/DesirePanel'
 import DataStatsPanel from './components/DataStatsPanel'
 import Sidebar from './components/Sidebar'
@@ -81,7 +82,9 @@ function App() {
   const [diaryOpen, setDiaryOpen] = useState(false)
   const [appCheckOpen, setAppCheckOpen] = useState(false)
   const [calendarOpen, setCalendarOpen] = useState(false)
-  const [readingOpen, setReadingOpen] = useState(false) // 沉浸式阅读页面
+  const [readingNotesOpen, setReadingNotesOpen] = useState(false) // 读书笔记页面
+  const [floatVisible, setFloatVisible] = useState(false) // 悬浮窗显示状态
+  const handleToggleFloat = () => setFloatVisible(v => !v)
   const [desireOpen, setDesireOpen] = useState(false) // X 的内心（欲望驱动系统）
   const [statsOpen, setStatsOpen] = useState(false) // 数据体积面板
   // 工具列表以后端返回为准（loadTools 会覆盖），
@@ -240,7 +243,7 @@ function App() {
     if (diaryOpen) { setDiaryOpen(false); return true }
     if (appCheckOpen) { setAppCheckOpen(false); return true }
     if (calendarOpen) { setCalendarOpen(false); return true }
-    if (readingOpen) { setReadingOpen(false); return true }
+    if (readingNotesOpen) { setReadingNotesOpen(false); return true }
     if (desireOpen) { setDesireOpen(false); return true }
     if (statsOpen) { setStatsOpen(false); return true }
     if (sidebarOpen) { setSidebarOpen(false); return true }
@@ -552,7 +555,7 @@ function App() {
           onOpenMemory={() => setMemoryOpen(true)}
           onOpenDiary={() => setDiaryOpen(true)}
           onOpenAppCheck={() => setAppCheckOpen(true)}
-          onOpenReading={() => setReadingOpen(true)}
+          onOpenReadingNotes={() => setReadingNotesOpen(true)}
           onOpenCalendar={() => setCalendarOpen(true)}
           onOpenDesire={() => setDesireOpen(true)}
           onOpenStats={() => setStatsOpen(true)}
@@ -655,10 +658,17 @@ function App() {
         />
       )}
 
-      {/* 沉浸式阅读页面 - 整合书架、阅读、笔记、AI讨论 */}
-      {readingOpen && (
-        <ReadingPage
-          onClose={() => setReadingOpen(false)}
+      {/* 读书笔记页面 - 独立组件页面，包含MCP工具交互和可视化管理 */}
+      {readingNotesOpen && (
+        <ReadingNotesPage
+          onClose={() => {
+            setReadingNotesOpen(false);
+            setFloatVisible(false);
+          }}
+          onSendMessage={handleSend}
+          onToggleFloat={handleToggleFloat}
+          floatVisible={floatVisible}
+          onFloatVisibilityChange={setFloatVisible}
         />
       )}
 

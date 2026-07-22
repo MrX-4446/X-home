@@ -7,8 +7,20 @@ import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.Plugin;
+
+import com.x.home.plugins.FloatOverlayPlugin;
+
+import java.util.ArrayList;
+import java.util.List;
 
 public class MainActivity extends BridgeActivity {
+    @Override
+    public List<Class<? extends Plugin>> getPlugins() {
+        List<Class<? extends Plugin>> plugins = new ArrayList<>();
+        plugins.add(FloatOverlayPlugin.class);
+        return plugins;
+    }
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
