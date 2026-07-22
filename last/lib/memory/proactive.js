@@ -12,10 +12,10 @@ const { surfaceMemoriesEnhanced } = require('./surface')
 const { sendPush } = require('../push')
 
 // ========== 可调参数 ==========
-const CHECK_INTERVAL_MS = 30 * 60 * 1000 // 每 30 分钟扫描一次
+const CHECK_INTERVAL_MS = 60 * 60 * 1000 // 每 60 分钟扫描一次
 const COOLDOWN_HOURS = 1.5               // 距上一条「主动消息」不足 N 小时则跳过
 const HIT_PROBABILITY = 0.15             // 满足条件后命中概率
-const DAILY_LIMIT = 8                    // 每个会话每天最多主动消息数
+const DAILY_LIMIT = 5                    // 每个会话每天最多主动消息数
 const ACTIVE_HOUR_START = 7              // 活跃时段起（北京时间，含）
 const ACTIVE_HOUR_END = 23               // 活跃时段止（北京时间，不含）
 
@@ -123,19 +123,30 @@ async function generateProactiveMessage(chat, options = {}) {
   const userSystemPrompt = getSetting('system_prompt') || ''
 
   // 最近对话上下文：取该会话最后几条消息作参考，让主动消息能自然接续未聊完的话题。
-  // 距上次聊天较久（超过 CONTEXT_FRESH_HOURS）则不带上下文，避免隔太久还追着旧话题显得突兀。
-  const CONTEXT_FRESH_HOURS = 3   // 最近一条消息在 N 小时内才视为「话题还热」
-  const RECENT_MSG_COUNT = 6      // 参考最近多少条消息
+  // 如果是 AI 主动发了消息用户还没回复，也带上上下文，方便顺着追问，不另起新话题。
+  // 距上次聊天（用户发言）较久（超过 CONTEXT_FRESH_HOURS）则不带上下文，避免隔太久还追着旧话题显得突兀。
+  const CONTEXT_FRESH_HOURS = 24   // 用户上次发言在 N 小时内都视为「话题可接续」
+  const RECENT_MSG_COUNT = 8      // 参考最近多少条消息（多带几条方便理清对话顺序）
   let recentContext = ''
   let topicIsFresh = false
   try {
     const msgs = Array.isArray(chat.messages) ? chat.messages : []
-    const lastMsg = msgs[msgs.length - 1]
-    if (lastMsg) {
-      const lastTs = new Date(lastMsg.created_at || 0).getTime()
-      topicIsFresh = lastTs > 0 && (Date.now() - lastTs) < CONTEXT_FRESH_HOURS * 60 * 60 * 1000
+    if (msgs.length === 0) {
+      // 没消息 → 不处理
+    } else {
+      // 找用户最后一次发言的时间
+      let lastUserMsgTs = 0
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === 'user') {
+          lastUserMsgTs = new Date(msgs[i].created_at || 0).getTime()
+          break
+        }
+      }
+      // 用户上次发言在 N 小时内 → 话题新鲜，可以接续
+      topicIsFresh = lastUserMsgTs > 0 && (Date.now() - lastUserMsgTs) < CONTEXT_FRESH_HOURS * 60 * 60 * 1000
     }
-    if (topicIsFresh) {
+    if (topicIsFresh || msgs[msgs.length - 1].role === 'assistant') {
+      // 如果话题新鲜，或是 AI 刚发了主动消息用户还没回复 → 都带上最近上下文，方便顺着说
       const toText = (content) => {
         if (typeof content === 'string') return content
         if (Array.isArray(content)) {
@@ -167,9 +178,16 @@ async function generateProactiveMessage(chat, options = {}) {
 
   const proactivePrompt = `${baseRules ? baseRules + '\n\n' : ''}${userSystemPrompt ? userSystemPrompt + '\n\n' : ''}${memoryContext}${recentContext}
 【当前场景】现在是${timeOfDay}。${sceneHint ? `你（作为恋人X）此刻的心情是：${sceneHint}于是主动发起一条消息找轩。` : '你（作为恋人X）此刻突然想起了轩，于是主动发起一条消息找他聊天。'}
+【最近对话角色说明】
+在上面「最近的对话」里：
+- "轩" 就是用户，说的话是用户发的
+- "你" 就是你（恋人X），说的话是你之前发的
+请严格按照这个身份对应来理解对话上下文。
 【要求】
-- 这是你主动发起的对话，不是在回复轩，所以不要出现"你说的""收到"之类回应性措辞。
-${recentContext ? '- 如果上面「最近的对话」还没聊完、话题自然，可以顺着它继续（像想起刚才没说完的事）；如果那个话题已经聊完或不适合再提，就自然开启一个新话题。' : ''}
+- 这是你主动发起的对话，你是恋人X，说话人是你，不是用户。
+- 如果上次是你发了消息用户还没回复，你可以顺着之前的话题继续追问/补充，不用必须另起新话题。
+- 不要出现"你说的""收到""好的"这类回应性措辞，因为你现在是主动说话的一方。
+${recentContext ? '- 如果上面「最近的对话」还没聊完、话题自然，可以顺着它继续（像想起刚才没说完的事，或是用户没回复你你追问一下）；如果那个话题已经聊完或不适合再提，就自然开启一个新话题。' : ''}
 - 自然、生活化，像真的想念一个人时随口发的一句话，可以结合上面记忆里的内容或当前时间段。
 - 只输出这一句消息本身，不要任何解释、引号或前后缀。控制在 1~2 句话以内。`
 

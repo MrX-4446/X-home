@@ -13,17 +13,17 @@ const { generateProactiveMessage } = require('../memory/proactive')
 const { generateTeaseMessage } = require('./tease')
 const state = require('./state')
 
-// 与主动消息任务同频：每 30 分钟推进一拍
-const TICK_INTERVAL_MS = 30 * 60 * 1000
+// 与主动消息任务同频：每 60 分钟推进一拍
+const TICK_INTERVAL_MS = 60 * 60 * 1000
 const COOLDOWN_HOURS = 1.5    // 距上一条「主动消息」不足 N 小时则不主动冒头
-const DAILY_LIMIT = 8         // 每个会话每天主动消息上限（与随机想念共享计数）
+const DAILY_LIMIT = 5         // 每个会话每天主动消息上限（与随机想念共享计数）
 const ACTIVE_HOUR_START = 7   // 活跃时段起（北京时间，含）
 const ACTIVE_HOUR_END = 23    // 活跃时段止（北京时间，不含）
 
 // tease（libido）独立、更克制的频控：冷静期更长、每日上限更低，
 // 避免高频黏人骚扰（对齐方案第六节 libido 风控）。
 const TEASE_COOLDOWN_HOURS = 3 // 距上一条 tease 不足 N 小时则不再撩
-const TEASE_DAILY_LIMIT = 4    // 每个会话每天 tease 上限
+const TEASE_DAILY_LIMIT = 3    // 每个会话每天 tease 上限
 
 function getBeijingNow() {
   return new Date(Date.now() + 8 * 60 * 60 * 1000)

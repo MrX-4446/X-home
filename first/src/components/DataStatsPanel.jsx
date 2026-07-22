@@ -36,8 +36,10 @@ const SOURCE_LABELS = {
 
 function DataStatsPanel({ onClose }) {
   const [stats, setStats] = useState(null)
+  const [portraitDetail, setPortraitDetail] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [loadingDetail, setLoadingDetail] = useState(false)
 
   async function load() {
     setLoading(true)
@@ -45,10 +47,26 @@ function DataStatsPanel({ onClose }) {
     try {
       const res = await api.get('/api/stats')
       setStats(res.data)
+      // 如果有画像数据，加载详细内容
+      if (res.data.portrait.total > 0) {
+        await loadPortraitDetail()
+      }
     } catch (e) {
       setError(e.message || String(e))
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function loadPortraitDetail() {
+    setLoadingDetail(true)
+    try {
+      const res = await api.get('/api/self-portrait')
+      setPortraitDetail(res.data)
+    } catch (e) {
+      console.error('加载画像详情失败', e)
+    } finally {
+      setLoadingDetail(false)
     }
   }
 
@@ -154,6 +172,51 @@ function DataStatsPanel({ onClose }) {
                     </div>
                   </div>
                 </div>
+
+                {/* 画像详细列表 */}
+                {loadingDetail && (
+                  <div className="portrait-loading">
+                    <div className="loading-spinner small"></div>
+                    <span>正在加载画像详情...</span>
+                  </div>
+                )}
+                {portraitDetail && (
+                  <div className="portrait-detail-list">
+                    {portraitDetail.stable.length > 0 && (
+                      <div className="portrait-group">
+                        <h4 className="portrait-group-title">◈ 稳定特质</h4>
+                        <div className="portrait-items">
+                          {portraitDetail.stable.map(item => (
+                            <div key={item.id} className="portrait-item">
+                              <div className="portrait-item-text">{item.text}</div>
+                              <div className="portrait-item-meta">
+                                激活: {item.activation_count || 0}
+                                {item.is_pinned && ' · 置顶'}
+                                {item.created_at && ` · ${new Date(item.created_at).toLocaleDateString('zh-CN')}`}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {portraitDetail.recent.length > 0 && (
+                      <div className="portrait-group">
+                        <h4 className="portrait-group-title">◇ 近期状态</h4>
+                        <div className="portrait-items">
+                          {portraitDetail.recent.map(item => (
+                            <div key={item.id} className="portrait-item recent">
+                              <div className="portrait-item-text">{item.text}</div>
+                              <div className="portrait-item-meta">
+                                激活: {item.activation_count || 0}
+                                {item.created_at && ` · ${new Date(item.created_at).toLocaleDateString('zh-CN')}`}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* 记忆分类明细 */}
